@@ -1,0 +1,11 @@
+[[target]]
+name = "b_lib"
+type = "library"
+srcs = ["b.py"]
+deps = ["//c:c_lib"]
+
+[[target]]
+name = "b_test"
+type = "test"
+srcs = ["test_b.py"]
+deps = [":b_lib"]

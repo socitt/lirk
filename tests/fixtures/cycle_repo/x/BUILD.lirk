@@ -1,0 +1,5 @@
+[[target]]
+name = "x"
+type = "library"
+srcs = ["x.py"]
+deps = ["//y:y"]

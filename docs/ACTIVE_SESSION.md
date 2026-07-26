@@ -10,6 +10,19 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-26 (update 4)
+
+- **Status**: Step 4 done. `lirk/graph.py` scans a repo tree for
+  BUILD.lirk files, resolves `//pkg:name` and `:name` deps into
+  qualified labels, builds a Graph (targets + edges), and does a
+  DFS-based topological sort with cycle detection (reports the full
+  cycle path). Fixtures added under tests/fixtures/: sample_repo
+  (linear a->b->c chain, each with a lib + a test depending on its
+  sibling lib), cycle_repo (x<->y cycle), missing_dep_repo, and
+  self_dep_repo. 6 new tests, 15 total, all passing.
+- Next: step 5, content-hash-based incremental build cache
+  (.lirk-cache.json).
+
 ## 2026-07-26 (update 3)
 
 - **Status**: Git push auth resolved (user configured credentials
