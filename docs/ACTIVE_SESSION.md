@@ -10,6 +10,17 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-26 (update 3)
+
+- **Status**: Git push auth resolved (user configured credentials
+  outside this chat). Pushed the two queued commits successfully.
+  Step 3 done: chose TOML for BUILD.lirk (docs/design/target-format.md
+  has the tradeoff), implemented `lirk/targets.py` (Target dataclass +
+  parse_build_file), 9 passing unittest cases in
+  tests/test_targets.py. All committed and pushed.
+- Next: step 4, dependency graph + topological sort across all
+  packages in a repo, with fake fixture targets.
+
 ## 2026-07-26 (update 2)
 
 - **Status**: Step 1 (this file) committed locally as `aad26aa`, but
