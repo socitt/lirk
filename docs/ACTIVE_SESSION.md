@@ -10,6 +10,34 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-26 (update 6)
+
+- **Status**: Step 6 done — CLI implemented and manually verified.
+  `lirk/actions.py`: `validate_target` (checks srcs exist — v1's
+  whole "build" step, no compilation needed) and `run_test` (one
+  `subprocess.run([sys.executable, "-m", "unittest", module], cwd=...,
+  capture_output=True, text=True)` call per test src file — no shell,
+  no new process group/session, no pty, no separate results-file
+  step; output/exit code read straight off that call).
+  `lirk/graph.py` gained `transitive_closure` so `build`/`test` on a
+  single label only touch that target's dependency subgraph.
+  `lirk/cli.py`: `build`/`test` subcommands, `//path:name` or `//...`.
+  `bin/lirk` added as a short executable shim (`./bin/lirk build ...`
+  instead of `python3 -m lirk build ...`) since every keystroke counts
+  on the iOS on-screen keyboard.
+  **Bug caught during manual end-to-end testing (not by the unit
+  suite)**: running `lirk build //...` then `lirk test //...` reported
+  every test target as already "cached" — build's file-existence
+  validation of a test target wrote the same fingerprint key that
+  test's pass/fail cache used, so a build could silently mean a test
+  never actually ran. Fixed by namespacing cache keys per command
+  (`build:label` vs `test:label`); added a regression test
+  (`test_build_does_not_satisfy_a_later_test_run`) and re-verified
+  manually. 42 tests passing.
+- Steps 1-6 all complete, committed, and pushed. Stopping here per
+  the plan — no dogfooding against terminal-projects until told to
+  proceed.
+
 ## 2026-07-26 (update 5)
 
 - **Status**: Step 5 done. `lirk/cache.py` computes a per-target

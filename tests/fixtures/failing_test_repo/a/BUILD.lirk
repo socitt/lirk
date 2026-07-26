@@ -1,0 +1,10 @@
+[[target]]
+name = "a_lib"
+type = "library"
+srcs = ["a.py"]
+
+[[target]]
+name = "a_test"
+type = "test"
+srcs = ["test_a.py"]
+deps = [":a_lib"]

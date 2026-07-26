@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 
-from lirk.graph import GraphError, build_graph, topological_sort
+from lirk.graph import GraphError, build_graph, topological_sort, transitive_closure
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -50,6 +50,23 @@ class TopologicalSortTests(unittest.TestCase):
         graph = build_graph(FIXTURES / "cycle_repo")
         with self.assertRaisesRegex(GraphError, "circular dependency"):
             topological_sort(graph)
+
+
+class TransitiveClosureTests(unittest.TestCase):
+    def test_includes_roots_and_their_dependencies(self):
+        graph = build_graph(FIXTURES / "sample_repo")
+
+        closure = transitive_closure(graph, {"//a:a_lib"})
+
+        self.assertEqual(closure, {"//a:a_lib", "//b:b_lib", "//c:c_lib"})
+
+    def test_excludes_unrelated_targets(self):
+        graph = build_graph(FIXTURES / "sample_repo")
+
+        closure = transitive_closure(graph, {"//c:c_test"})
+
+        self.assertEqual(closure, {"//c:c_test", "//c:c_lib"})
+        self.assertNotIn("//a:a_lib", closure)
 
 
 if __name__ == "__main__":

@@ -106,3 +106,19 @@ def topological_sort(graph: Graph) -> list[str]:
             visit(label)
 
     return order
+
+
+def transitive_closure(graph: Graph, roots: set[str]) -> set[str]:
+    """All labels reachable from `roots` by following dependency edges.
+
+    `roots` themselves are included in the result.
+    """
+    closure: set[str] = set()
+    stack = list(roots)
+    while stack:
+        label = stack.pop()
+        if label in closure:
+            continue
+        closure.add(label)
+        stack.extend(graph.edges[label])
+    return closure

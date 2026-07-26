@@ -1,0 +1,155 @@
+"""The `lirk` command line: `build` and `test`, over a single target
+label or `//...` for the whole repo. Output is kept compact -- this
+runs in a narrow phone terminal.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+from lirk.actions import run_test, validate_target
+from lirk.cache import (
+    CACHE_FILENAME,
+    compute_fingerprints,
+    load_cache,
+    needs_build,
+    save_cache,
+)
+from lirk.graph import Graph, GraphError, build_graph, topological_sort, transitive_closure
+from lirk.targets import ConfigError
+
+ALL_TARGETS = "//..."
+
+
+def _load_graph(root: Path) -> tuple[Graph, list[str]] | None:
+    try:
+        graph = build_graph(root)
+        order = topological_sort(graph)
+    except (ConfigError, GraphError) as e:
+        print(f"lirk: {e}", file=sys.stderr)
+        return None
+    return graph, order
+
+
+def _execute(root: Path, graph: Graph, order: list[str], mode: str) -> bool:
+    """Validate (and, in 'test' mode, run) each target in `order`.
+
+    `mode` ('build' or 'test') namespaces the cache: `lirk build`
+    merely validating a test target's files must not count as
+    `lirk test` having actually run and passed it, so the two modes
+    never share a cache entry for the same target.
+
+    Returns True iff everything succeeded. Only successful results are
+    written to the cache, so a failure is retried on the next run even
+    if its fingerprint hasn't changed.
+    """
+    cache_path = root / CACHE_FILENAME
+    cache = load_cache(cache_path)
+    fingerprints = compute_fingerprints(graph, root, order)
+
+    ok = True
+    for label in order:
+        target = graph.targets[label]
+        fp = fingerprints[label]
+        cache_key = f"{mode}:{label}"
+
+        if not needs_build(cache_key, fp, cache):
+            print(f"  cached  {label}")
+            continue
+
+        if mode == "test" and target.type == "test":
+            result = run_test(target, root)
+            verb = "PASS" if result.ok else "FAIL"
+        else:
+            result = validate_target(target, root)
+            verb = "built" if result.ok else "FAIL"
+
+        if result.ok:
+            cache[cache_key] = fp
+            print(f"  {verb:6} {label}")
+        else:
+            ok = False
+            print(f"  {verb:6} {label}: {result.message}")
+            for stream in (result.stdout, result.stderr):
+                if stream.strip():
+                    print(stream.rstrip())
+
+    save_cache(cache_path, cache)
+    return ok
+
+
+def cmd_build(root: Path, label: str) -> int:
+    loaded = _load_graph(root)
+    if loaded is None:
+        return 1
+    graph, order = loaded
+
+    if label == ALL_TARGETS:
+        roots = set(graph.targets)
+    elif label in graph.targets:
+        roots = {label}
+    else:
+        print(f"lirk: unknown target: {label}", file=sys.stderr)
+        return 1
+
+    closure = transitive_closure(graph, roots)
+    subset_order = [l for l in order if l in closure]
+
+    ok = _execute(root, graph, subset_order, mode="build")
+    print("lirk: OK" if ok else "lirk: FAILED")
+    return 0 if ok else 1
+
+
+def cmd_test(root: Path, label: str) -> int:
+    loaded = _load_graph(root)
+    if loaded is None:
+        return 1
+    graph, order = loaded
+
+    if label == ALL_TARGETS:
+        roots = {l for l in graph.targets if graph.targets[l].type == "test"}
+        if not roots:
+            print("lirk: no test targets found")
+            return 0
+    elif label not in graph.targets:
+        print(f"lirk: unknown target: {label}", file=sys.stderr)
+        return 1
+    elif graph.targets[label].type != "test":
+        print(
+            f"lirk: {label} is type {graph.targets[label].type!r}, not 'test'",
+            file=sys.stderr,
+        )
+        return 1
+    else:
+        roots = {label}
+
+    closure = transitive_closure(graph, roots)
+    subset_order = [l for l in order if l in closure]
+
+    ok = _execute(root, graph, subset_order, mode="test")
+    print("lirk: OK" if ok else "lirk: FAILED")
+    return 0 if ok else 1
+
+
+def main(argv: list[str] | None = None, root: Path | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="lirk")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    build_p = sub.add_parser("build", help="validate a target and its deps")
+    build_p.add_argument("label", help="//path:target or //...")
+
+    test_p = sub.add_parser("test", help="run a test target")
+    test_p.add_argument("label", help="//path:target or //...")
+
+    args = parser.parse_args(argv)
+    root = root if root is not None else Path.cwd()
+
+    if args.command == "build":
+        return cmd_build(root, args.label)
+    return cmd_test(root, args.label)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
