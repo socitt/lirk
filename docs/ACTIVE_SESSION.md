@@ -10,6 +10,21 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-26 (update 2)
+
+- **Status**: Step 1 (this file) committed locally as `aad26aa`, but
+  `git push` failed — no git credentials configured in this
+  environment (no credential helper, no `gh`, no SSH key). Asked
+  user how to handle auth; user chose to configure credentials
+  themselves outside this chat (declined pasting a PAT into the
+  conversation, which was the right call — reasonable to avoid
+  putting long-lived secrets in a transcript). `github-cli` (2.83.0)
+  is available via `apk` if a device-code login is wanted later.
+  **Commits are accumulating locally and are NOT yet on the remote.**
+  Proceeding with local commits per the plan; push everything once
+  auth is sorted.
+- Next: README (step 2), then target-config format (step 3).
+
 ## 2026-07-26
 
 - **Status**: Session start. Repo initialized with LICENSE only.
