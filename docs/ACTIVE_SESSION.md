@@ -10,6 +10,19 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-26 (update 5)
+
+- **Status**: Step 5 done. `lirk/cache.py` computes a per-target
+  fingerprint (own name/type, source file contents, transitive dep
+  fingerprints) and a `.lirk-cache.json` load/save round-trip
+  (already gitignored). Added real source files (a.py/b.py/c.py +
+  their tests) to the sample_repo fixture so hashing has real content
+  to work on — these will double as fixtures for step 6's actual
+  subprocess-based test execution. 10 new tests, 25 total, all
+  passing.
+- Next: step 6, CLI `build`/`test` commands wired to subprocess.run()
+  per the no-process-group/no-pty/no-results-file constraints.
+
 ## 2026-07-26 (update 4)
 
 - **Status**: Step 4 done. `lirk/graph.py` scans a repo tree for
