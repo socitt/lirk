@@ -37,7 +37,15 @@ to be attempted, and once done, what actually happened.
   (`.lirk-cache.json`, `__pycache__/`, `*.pyc`) for repos that consume
   lirk — mirrors what lirk's own `.gitignore` already has. Doc-only,
   no test to run.
-- Next: item 3, syntax validation for `library` targets.
+- Item 3 done: `validate_target` (`lirk/actions.py`) now `ast.parse()`s
+  every declared `srcs` file after confirming it exists, so a broken
+  `main.py`-style file reports `FAIL: syntax error` on `lirk build`
+  instead of silently reporting `built`. New fixture
+  `tests/fixtures/syntax_error_repo` (one library target, one file
+  with a deliberate syntax error) backs a unit test on
+  `validate_target` directly and a CLI-level test on `lirk build`.
+  Full suite: 46/46 passing (44 prior + 2 new).
+- Next: item 4, `--root` flag + upward repo-root discovery.
 
 ## 2026-07-27
 

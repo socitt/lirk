@@ -25,6 +25,16 @@ class ValidateTargetTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("missing.py", result.message)
 
+    def test_fails_when_source_file_has_a_syntax_error(self):
+        graph = build_graph(FIXTURES / "syntax_error_repo")
+        target = graph.targets["//a:a"]
+
+        result = validate_target(target, FIXTURES / "syntax_error_repo")
+
+        self.assertFalse(result.ok)
+        self.assertIn("broken.py", result.message)
+        self.assertIn("syntax error", result.message)
+
 
 class RunTestTests(unittest.TestCase):
     def test_passes_for_a_passing_test(self):

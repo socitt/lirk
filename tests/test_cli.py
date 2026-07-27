@@ -52,6 +52,17 @@ class BuildCommandTests(unittest.TestCase):
         code, out = _run(["build", "//nope:missing"], self.root)
         self.assertEqual(code, 1)
 
+    def test_build_fails_on_a_syntax_error(self):
+        syntax_root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, syntax_root, ignore_errors=True)
+        shutil.copytree(FIXTURES / "syntax_error_repo", syntax_root, dirs_exist_ok=True)
+
+        code, out = _run(["build", "//a:a"], syntax_root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", out)
+        self.assertIn("syntax error", out)
+
     def test_force_bypasses_cache_without_deleting_it(self):
         _run(["build", "//..."], self.root)
         code, out = _run(["build", "//...", "--force"], self.root)

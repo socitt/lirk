@@ -8,6 +8,7 @@ new process group/session, no pseudo-terminal, no shell=True.
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 import sys
@@ -27,14 +28,25 @@ class ActionResult:
 
 
 def validate_target(target: Target, root: Path) -> ActionResult:
-    """'Build' a target. Python needs no compilation step, so for v1
-    this just confirms its declared source files exist."""
+    """'Build' a target: confirm its declared source files exist and
+    parse as syntactically valid Python. No compilation step beyond
+    that (v1 has no bytecode/artifact output)."""
     pkg_dir = root / target.package
     missing = [src for src in target.srcs if not (pkg_dir / src).is_file()]
     if missing:
         return ActionResult(
             target.label, False, f"missing source file(s): {', '.join(missing)}"
         )
+
+    for src in target.srcs:
+        src_path = pkg_dir / src
+        try:
+            ast.parse(src_path.read_text(), filename=str(src_path))
+        except SyntaxError as e:
+            return ActionResult(
+                target.label, False, f"{src}: syntax error: {e}"
+            )
+
     return ActionResult(target.label, True, "ok")
 
 
