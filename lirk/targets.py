@@ -12,6 +12,7 @@ from pathlib import Path
 
 BUILD_FILENAME = "BUILD.lirk"
 VALID_TYPES = {"library", "test"}
+KNOWN_KEYS = {"name", "type", "srcs", "deps", "data"}
 
 
 class ConfigError(Exception):
@@ -65,6 +66,10 @@ def _parse_target(raw: dict, path: Path, package: str, index: int) -> Target:
 
     if not isinstance(raw, dict):
         raise ConfigError(f"{where}: each [[target]] entry must be a table")
+
+    unknown = sorted(set(raw) - KNOWN_KEYS)
+    if unknown:
+        raise ConfigError(f"{where}: unknown key(s): {', '.join(unknown)}")
 
     name = raw.get("name")
     if not isinstance(name, str) or not name:

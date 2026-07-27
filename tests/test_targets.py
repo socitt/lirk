@@ -139,6 +139,18 @@ class ParseBuildFileTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "'srcs'"):
             parse_build_file(path, package="pkg")
 
+    def test_unknown_key_raises_config_error(self):
+        path = self._write(
+            """
+            [[target]]
+            name = "x"
+            type = "library"
+            dpes = [":something"]
+            """
+        )
+        with self.assertRaisesRegex(ConfigError, "unknown key\\(s\\): dpes"):
+            parse_build_file(path, package="pkg")
+
     def test_target_table_must_be_array(self):
         path = self._write(
             """

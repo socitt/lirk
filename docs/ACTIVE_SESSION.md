@@ -167,6 +167,22 @@ to be attempted, and once done, what actually happened.
   confirmed `git diff lirk/cache.py` was empty. Full suite: 71/71,
   run 3x clean in fresh shells (~70-154s each -- runtime is climbing
   as fixtures accumulate; worth keeping an eye on per review D6).
+- **Task 8 done** (first MEDIUM item; all 7 HIGH items now closed).
+  `lirk/targets.py`: new `KNOWN_KEYS = {"name", "type", "srcs", "deps",
+  "data"}`; `_parse_target` now raises `ConfigError` naming any
+  unknown key(s) (sorted, for a stable message) right after the
+  table-type check. Checked every existing fixture `BUILD.lirk` first
+  (a small script parsing each and diffing its keys against
+  `KNOWN_KEYS`) -- none use an undeclared key, so this doesn't break
+  anything already committed. New test in `test_targets.py` asserting
+  a typo'd `dpes` key raises `ConfigError` mentioning it. This is the
+  fix review C6 asked for: a transposed key like `dpes` used to
+  silently produce a target with no dependency edges, so the real
+  dependency never entered the fingerprint and changes to it never
+  invalidated the cache. Full suite: 72/72, run 2x clean in fresh
+  shells (~66-67s each) -- two rather than three since this is a
+  parse-layer change, not the subprocess/cache-execution axis the
+  extra runs are meant to guard.
 
 ## 2026-07-27 (update 6)
 
