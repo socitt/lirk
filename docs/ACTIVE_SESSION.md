@@ -10,6 +10,29 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-27
+
+- **Status**: Picked up an uncommitted `FINDINGS.md` left by another
+  session's dogfooding run against `terminal-projects`' `shared/`
+  package. It reported `lirk test` failing 0/10 on a root-relative
+  import (`from shared import term`) with `ModuleNotFoundError`, fully
+  root-caused (`run_test` set `cwd=pkg_dir` with no `PYTHONPATH`, so
+  the package itself was never importable) but not yet fixed.
+  Confirmed this was a real lirk bug, not a clean pass, so it did not
+  get folded into `terminal-projects` as a dogfooding success —
+  documented in this repo's new `docs/KNOWN_ISSUES.md` instead.
+  User approved attempting the smallest of the three sketched fixes:
+  inject `PYTHONPATH=<repo root>` into the test subprocess's `env`
+  (keeping `cwd=pkg_dir` unchanged). Applied it, then verified with
+  two separate 10-run batches against `terminal-projects`'
+  `shared:term_test` in fresh shells — 10/10 passing, and 10/10 again
+  with `.lirk-cache.json` deleted before every run to force a real
+  subprocess execution each time (not a cached result). Full existing
+  suite still 42/42 passing. Fix confirmed, documented as "found and
+  fixed" in `docs/KNOWN_ISSUES.md`, `FINDINGS.md` deleted (content
+  folded into `KNOWN_ISSUES.md`).
+- Stopping here per the plan — no further new work this session.
+
 ## 2026-07-26 (update 6)
 
 - **Status**: Step 6 done — CLI implemented and manually verified.

@@ -8,6 +8,7 @@ new process group/session, no pseudo-terminal, no shell=True.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -47,6 +48,15 @@ def run_test(target: Target, root: Path) -> ActionResult:
     stdout_parts = []
     stderr_parts = []
 
+    env = os.environ.copy()
+    root_str = str(root.resolve())
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{root_str}{os.pathsep}{existing_pythonpath}"
+        if existing_pythonpath
+        else root_str
+    )
+
     for src in target.srcs:
         module = Path(src).stem
         proc = subprocess.run(
@@ -54,6 +64,7 @@ def run_test(target: Target, root: Path) -> ActionResult:
             cwd=pkg_dir,
             capture_output=True,
             text=True,
+            env=env,
         )
         stdout_parts.append(proc.stdout)
         stderr_parts.append(proc.stderr)
