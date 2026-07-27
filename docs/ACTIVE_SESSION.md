@@ -10,6 +10,30 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-27 (update 2)
+
+- **Status**: Picked up `docs/LIRK_ASSESSMENT.md` (untracked hand-off
+  from a dogfooding session in `terminal-projects`, 4 real targets, 60
+  fresh-shell test invocations, zero lirk-side bugs found). Summarized
+  its findings and agreed a priority order with the user: no bugs to
+  fix, so working through suggestions ranked by value/effort — (1)
+  `--force`/`--rebuild` flag, (2) `.gitignore` docs, (3) `library`
+  syntax validation, (4) `--root` + upward repo-root discovery, defer
+  the rest (`lirk run`, `srcs` glob, `lirk query`, parallelism, remote
+  caching, sandboxing — all explicitly "not urgent yet" per the
+  assessment itself).
+- Item 1 done: `--force`/`--rebuild` (build) and `--force`/`--rerun`
+  (test) flags added to `lirk/cli.py`, threaded through `cmd_build`/
+  `cmd_test`/`_execute` as a `force` bool that skips the `needs_build`
+  cache check without touching the cache file. Two new tests
+  (`test_force_bypasses_cache_without_deleting_it`,
+  `test_force_reruns_unchanged_test_without_deleting_cache`). Full
+  suite: 44/44 passing (42 prior + 2 new). Manually verified end-to-end
+  against `sample_repo` in a scratch dir: first run builds, second run
+  shows `cached`, forced third run rebuilds everything and the cache
+  file still exists afterward.
+- Next: item 2, document recommended `.gitignore` entries.
+
 ## 2026-07-27
 
 - **Status**: Picked up an uncommitted `FINDINGS.md` left by another

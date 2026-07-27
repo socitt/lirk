@@ -52,6 +52,14 @@ class BuildCommandTests(unittest.TestCase):
         code, out = _run(["build", "//nope:missing"], self.root)
         self.assertEqual(code, 1)
 
+    def test_force_bypasses_cache_without_deleting_it(self):
+        _run(["build", "//..."], self.root)
+        code, out = _run(["build", "//...", "--force"], self.root)
+
+        self.assertEqual(code, 0)
+        self.assertNotIn("cached", out)
+        self.assertTrue((self.root / ".lirk-cache.json").exists())
+
 
 class TestCommandTests(unittest.TestCase):
     def setUp(self):
@@ -97,6 +105,15 @@ class TestCommandTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("cached", out)
+
+    def test_force_reruns_unchanged_test_without_deleting_cache(self):
+        _run(["test", "//c:c_test"], self.root)
+        code, out = _run(["test", "//c:c_test", "--force"], self.root)
+
+        self.assertEqual(code, 0)
+        self.assertNotIn("cached", out)
+        self.assertIn("PASS", out)
+        self.assertTrue((self.root / ".lirk-cache.json").exists())
 
     def test_failing_test_is_retried_even_though_unchanged(self):
         failing_root = Path(tempfile.mkdtemp())

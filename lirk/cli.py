@@ -33,13 +33,17 @@ def _load_graph(root: Path) -> tuple[Graph, list[str]] | None:
     return graph, order
 
 
-def _execute(root: Path, graph: Graph, order: list[str], mode: str) -> bool:
+def _execute(root: Path, graph: Graph, order: list[str], mode: str, force: bool = False) -> bool:
     """Validate (and, in 'test' mode, run) each target in `order`.
 
     `mode` ('build' or 'test') namespaces the cache: `lirk build`
     merely validating a test target's files must not count as
     `lirk test` having actually run and passed it, so the two modes
     never share a cache entry for the same target.
+
+    `force`, if set, skips the cache check so every target is
+    re-validated/re-run regardless of its fingerprint, without
+    touching the cache file itself.
 
     Returns True iff everything succeeded. Only successful results are
     written to the cache, so a failure is retried on the next run even
@@ -55,7 +59,7 @@ def _execute(root: Path, graph: Graph, order: list[str], mode: str) -> bool:
         fp = fingerprints[label]
         cache_key = f"{mode}:{label}"
 
-        if not needs_build(cache_key, fp, cache):
+        if not force and not needs_build(cache_key, fp, cache):
             print(f"  cached  {label}")
             continue
 
@@ -80,7 +84,7 @@ def _execute(root: Path, graph: Graph, order: list[str], mode: str) -> bool:
     return ok
 
 
-def cmd_build(root: Path, label: str) -> int:
+def cmd_build(root: Path, label: str, force: bool = False) -> int:
     loaded = _load_graph(root)
     if loaded is None:
         return 1
@@ -97,12 +101,12 @@ def cmd_build(root: Path, label: str) -> int:
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
 
-    ok = _execute(root, graph, subset_order, mode="build")
+    ok = _execute(root, graph, subset_order, mode="build", force=force)
     print("lirk: OK" if ok else "lirk: FAILED")
     return 0 if ok else 1
 
 
-def cmd_test(root: Path, label: str) -> int:
+def cmd_test(root: Path, label: str, force: bool = False) -> int:
     loaded = _load_graph(root)
     if loaded is None:
         return 1
@@ -128,7 +132,7 @@ def cmd_test(root: Path, label: str) -> int:
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
 
-    ok = _execute(root, graph, subset_order, mode="test")
+    ok = _execute(root, graph, subset_order, mode="test", force=force)
     print("lirk: OK" if ok else "lirk: FAILED")
     return 0 if ok else 1
 
@@ -139,16 +143,24 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
 
     build_p = sub.add_parser("build", help="validate a target and its deps")
     build_p.add_argument("label", help="//path:target or //...")
+    build_p.add_argument(
+        "--force", "--rebuild", action="store_true", dest="force",
+        help="bypass the cache and re-validate every target in scope",
+    )
 
     test_p = sub.add_parser("test", help="run a test target")
     test_p.add_argument("label", help="//path:target or //...")
+    test_p.add_argument(
+        "--force", "--rerun", action="store_true", dest="force",
+        help="bypass the cache and re-run every test in scope",
+    )
 
     args = parser.parse_args(argv)
     root = root if root is not None else Path.cwd()
 
     if args.command == "build":
-        return cmd_build(root, args.label)
-    return cmd_test(root, args.label)
+        return cmd_build(root, args.label, force=args.force)
+    return cmd_test(root, args.label, force=args.force)
 
 
 if __name__ == "__main__":
