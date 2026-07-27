@@ -315,6 +315,25 @@ to be attempted, and once done, what actually happened.
   unchanged since it only checks `result.ok` and `"test_second" in
   message`, both still true with three srcs. Full suite: 80/80, run
   3x clean in fresh shells (~80-83s each).
+- **Task 15 done** (first LOW item; all HIGH/MEDIUM now closed). No
+  source change -- pure test-coverage gap closure (review T5). New
+  fixture `tests/fixtures/diamond_repo/` (`d -> b`, `d -> c`, both `b`
+  and `c` -> `a`, all in one package). `sample_repo`'s linear chain
+  never gave a target more than one dep, so two things were untested:
+  `compute_fingerprints` sorting a target's deps specifically so
+  declaration order doesn't matter, and `transitive_closure` visiting
+  a shared dependency (`a`) via two distinct paths without erroring
+  or double-counting. New tests: `test_graph.py`
+  (`test_diamond_dependency_produces_a_valid_order`,
+  `test_diamond_shared_dependency_reached_via_two_paths_is_deduplicated`)
+  and `test_cache.py` (`DiamondFingerprintTests`, which edits a
+  scratch copy's `BUILD.lirk` to swap `d_lib`'s declared dep order and
+  asserts an identical fingerprint). Verified the fingerprint test is
+  load-bearing: removed the `sorted()` around `graph.edges[label]` in
+  `compute_fingerprints` via `Edit`, confirmed the test fails (two
+  different hashes), restored, confirmed `git diff lirk/cache.py` was
+  empty. Full suite: 83/83, run 3x clean in fresh shells (~77-82s
+  each).
 
 ## 2026-07-27 (update 6)
 

@@ -74,6 +74,36 @@ class ComputeFingerprintsTests(unittest.TestCase):
             self.assertNotEqual(before[label], after[label], label)
 
 
+class DiamondFingerprintTests(unittest.TestCase):
+    # d -> b, d -> c, both b and c -> a. compute_fingerprints sorts a
+    # target's deps specifically so declaration order doesn't matter
+    # (cache.py:47); sample_repo's linear chain never gives a target
+    # more than one dep, so this was untested.
+    def _fingerprint_for_d(self, deps_order: str) -> str:
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "diamond_repo", root)
+
+        build_file = root / "pkg" / "BUILD.lirk"
+        text = build_file.read_text()
+        text = text.replace(
+            'deps = [":b_lib", ":c_lib"]', f"deps = {deps_order}"
+        )
+        build_file.write_text(text)
+
+        graph = build_graph(root)
+        order = topological_sort(graph)
+        fingerprints = compute_fingerprints(graph, root, order)
+        return fingerprints["//pkg:d_lib"]
+
+    def test_swapping_declared_dep_order_produces_an_identical_fingerprint(self):
+        fp_bc = self._fingerprint_for_d('[":b_lib", ":c_lib"]')
+        fp_cb = self._fingerprint_for_d('[":c_lib", ":b_lib"]')
+
+        self.assertEqual(fp_bc, fp_cb)
+
+
 class CacheFileTests(unittest.TestCase):
     def setUp(self):
         tmpdir = tempfile.TemporaryDirectory()

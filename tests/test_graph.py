@@ -84,6 +84,19 @@ class TopologicalSortTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "circular dependency"):
             topological_sort(graph)
 
+    def test_diamond_dependency_produces_a_valid_order(self):
+        # d -> b, d -> c, both b and c -> a. sample_repo's linear chain
+        # never gives a target more than one dep, so this is the only
+        # coverage for a dependency reached by two distinct paths.
+        graph = build_graph(FIXTURES / "diamond_repo")
+        order = topological_sort(graph)
+
+        self.assertEqual(set(order), set(graph.targets))
+        self.assertLess(order.index("//pkg:a_lib"), order.index("//pkg:b_lib"))
+        self.assertLess(order.index("//pkg:a_lib"), order.index("//pkg:c_lib"))
+        self.assertLess(order.index("//pkg:b_lib"), order.index("//pkg:d_lib"))
+        self.assertLess(order.index("//pkg:c_lib"), order.index("//pkg:d_lib"))
+
 
 class TransitiveClosureTests(unittest.TestCase):
     def test_includes_roots_and_their_dependencies(self):
@@ -100,6 +113,16 @@ class TransitiveClosureTests(unittest.TestCase):
 
         self.assertEqual(closure, {"//c:c_test", "//c:c_lib"})
         self.assertNotIn("//a:a_lib", closure)
+
+    def test_diamond_shared_dependency_reached_via_two_paths_is_deduplicated(self):
+        graph = build_graph(FIXTURES / "diamond_repo")
+
+        closure = transitive_closure(graph, {"//pkg:d_lib"})
+
+        self.assertEqual(
+            closure,
+            {"//pkg:d_lib", "//pkg:b_lib", "//pkg:c_lib", "//pkg:a_lib"},
+        )
 
 
 if __name__ == "__main__":
