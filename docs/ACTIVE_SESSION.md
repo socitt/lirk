@@ -10,6 +10,24 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-27 (update 5)
+
+- Item 3 (drop `lirk run` from the roadmap) checked — **nothing to
+  remove**. Searched `README.md`, `docs/KNOWN_ISSUES.md`,
+  `docs/design/`, and `lirk/*.py` (no `run` subcommand stub exists in
+  `cli.py`'s argparse setup) for any live tracking of `lirk run` as a
+  planned feature: none found. The only two places it's mentioned are
+  `docs/assessments/2026-07-26-assessment.md` (archived as a
+  permanent record — editing it would misrepresent what was actually
+  suggested/decided on 2026-07-26) and this file's own
+  `2026-07-27 (update 2)` log entry recapping that assessment's
+  deferred items (a log of a past decision, correct as of when it was
+  written). Neither is a live roadmap; both are historical records
+  left untouched. Conclusion: the follow-up assessment's suggestion to
+  "take it off the roadmap" is already satisfied — it was never on one
+  to begin with, only ever proposed and then deferred/reconsidered
+  within assessment documents.
+
 ## 2026-07-27 (update 4)
 
 - Item 2 (pass/fail summary line) done. `lirk/cli.py`: `_execute` now
