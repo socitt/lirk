@@ -32,7 +32,12 @@ to be attempted, and once done, what actually happened.
   against `sample_repo` in a scratch dir: first run builds, second run
   shows `cached`, forced third run rebuilds everything and the cache
   file still exists afterward.
-- Next: item 2, document recommended `.gitignore` entries.
+- Item 2 done: added a "Using lirk in a repo" section to `README.md`
+  documenting the recommended `.gitignore` entries
+  (`.lirk-cache.json`, `__pycache__/`, `*.pyc`) for repos that consume
+  lirk — mirrors what lirk's own `.gitignore` already has. Doc-only,
+  no test to run.
+- Next: item 3, syntax validation for `library` targets.
 
 ## 2026-07-27
 

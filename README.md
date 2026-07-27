@@ -49,6 +49,20 @@ prove the core approach (dependency graph, incremental builds via
 content hashing, direct subprocess execution) works reliably before
 expanding scope.
 
+## Using lirk in a repo
+
+A repo with `BUILD.lirk` files should gitignore the artifacts lirk
+generates alongside your source:
+
+```
+.lirk-cache.json
+__pycache__/
+*.pyc
+```
+
+`.lirk-cache.json` is lirk's incremental-build cache, written at the
+repo root; it's local state, not something to commit or share.
+
 ## Status
 
 Early development. Not yet self-hosting — lirk is tested with plain
