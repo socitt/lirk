@@ -17,6 +17,11 @@ from lirk.graph import Graph
 
 CACHE_FILENAME = ".lirk-cache.json"
 
+# Bump this whenever the behaviour of `validate_target` or `run_test`
+# changes, so existing caches are invalidated instead of trusting a
+# green result computed under different rules.
+ACTION_VERSION = 1
+
 
 def _hash_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -38,6 +43,7 @@ def compute_fingerprints(
         h = hashlib.sha256()
         h.update(target.name.encode())
         h.update(target.type.encode())
+        h.update(str(ACTION_VERSION).encode())
 
         for src in sorted(target.srcs):
             src_path = root / target.package / src

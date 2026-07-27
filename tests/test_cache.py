@@ -2,7 +2,9 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from lirk import cache as cache_module
 from lirk.cache import (
     compute_fingerprints,
     load_cache,
@@ -61,6 +63,15 @@ class ComputeFingerprintsTests(unittest.TestCase):
         for label in ("//b:b_lib", "//b:b_test", "//c:c_lib", "//c:c_test"):
             self.assertEqual(before[label], after[label], label)
         self.assertNotEqual(before["//a:a_lib"], after["//a:a_lib"])
+
+    def test_action_version_change_invalidates_every_target_unchanged(self):
+        with patch.object(cache_module, "ACTION_VERSION", 1):
+            _, _, before = self._fingerprints()
+        with patch.object(cache_module, "ACTION_VERSION", 2):
+            _, _, after = self._fingerprints()
+
+        for label in before:
+            self.assertNotEqual(before[label], after[label], label)
 
 
 class CacheFileTests(unittest.TestCase):

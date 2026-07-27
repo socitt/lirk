@@ -10,6 +10,31 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-27 (update 7)
+
+- **Committed the architecture review** (`docs/reviews/2026-07-26-architecture-review.md`,
+  filed by a separate deep-review session against `611dd23`) and its
+  derived `TASKS.md` (18 itemized follow-ups, HIGH/MEDIUM/LOW), both
+  as-is with no edits (`fd5a72b`). Starting work through `TASKS.md` in
+  order, one task per commit, full suite run after each. Hard
+  constraint carried forward from the review: no process
+  group/session/pty/`shell=True`/results-file patterns, ever — if a
+  task's acceptance criteria seem to need one, stop and flag rather
+  than implement. About to start Task 1 (`ACTION_VERSION` folded into
+  the cache fingerprint) since several later tasks depend on it.
+- **Task 1 done.** `lirk/cache.py`: added `ACTION_VERSION = 1` module
+  constant with a comment instructing future bumps whenever
+  `validate_target`/`run_test` behaviour changes; folded
+  `str(ACTION_VERSION)` into every target's hash in
+  `compute_fingerprints`, right after `target.type`. New test
+  `test_action_version_change_invalidates_every_target_unchanged` in
+  `test_cache.py` patches the constant to two different values via
+  `unittest.mock.patch.object` and asserts every target's fingerprint
+  differs. Full suite: 57/57 (up from 56), run 3x clean in fresh
+  shells (~41-46s each). Every later task that changes what
+  build/test success means must bump this constant in the same
+  commit — tasks 2, 10, 11, 14 per `TASKS.md`.
+
 ## 2026-07-27 (update 6)
 
 - **Closed out the follow-up assessment.** Per the user: archive as a
