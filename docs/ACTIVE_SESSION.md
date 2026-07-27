@@ -65,8 +65,17 @@ to be attempted, and once done, what actually happened.
   exactly as described); *with* the marker present, the same command
   resolves correctly. README documents the marker and `--root` flag.
 - All four planned items from `docs/LIRK_ASSESSMENT.md` are now done.
-  Next: decide the assessment file's fate (archive vs. fold into
-  `KNOWN_ISSUES.md`), commit, push.
+  Decided to archive rather than fold into `KNOWN_ISSUES.md`: the
+  assessment's only "bug" wasn't a `lirk` bug at all, and the rest is
+  a broad usage report (evidence + suggestions), not the
+  found/root-caused/fixed shape `KNOWN_ISSUES.md`'s convention
+  expects. Moved to `docs/assessments/2026-07-26-assessment.md`,
+  added a "Resolution" section at the top recording what happened to
+  each item (done + commit hash, or deferred + reason, matching the
+  assessment's own effort/value ranking).
+- This session's work on the assessment is complete: 4 commits
+  (`9b2e03f`, `f519fd8`, `3658ff0`, `fac0d0c`), each tested and pushed
+  individually, plus this archival commit. Stopping here.
 
 ## 2026-07-27
 
