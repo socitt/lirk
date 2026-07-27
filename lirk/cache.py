@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from lirk.graph import Graph
@@ -85,7 +86,12 @@ def load_cache(path: Path) -> dict[str, str]:
 
 
 def save_cache(path: Path, fingerprints: dict[str, str]) -> None:
-    path.write_text(json.dumps(fingerprints, indent=2, sort_keys=True) + "\n")
+    # Write to a sibling temp file and rename it into place, so an
+    # interrupted write can never leave a truncated cache -- os.replace
+    # is atomic, unlike write_text directly to `path`.
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(json.dumps(fingerprints, indent=2, sort_keys=True) + "\n")
+    os.replace(tmp_path, path)
 
 
 def needs_build(label: str, fingerprint: str, cache: dict[str, str]) -> bool:

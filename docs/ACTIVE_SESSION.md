@@ -245,6 +245,34 @@ to be attempted, and once done, what actually happened.
   fails (`True is not false` -- it just waited out the 5s sleep and
   reported PASS), restored, confirmed the diff matched intent. Full
   suite: 77/77, run 3x clean in fresh shells (~68-70s each).
+- **Task 12 done.** `lirk/cache.py`: `save_cache` now writes to a
+  sibling `.tmp` file and `os.replace()`s it onto the real path, so an
+  interrupted write can never leave a truncated cache (review D1).
+  `lirk/cli.py`: `_execute` now calls `save_cache` after every
+  individually successful target, not only once at the end of the
+  whole loop (the final call is kept too -- harmless, and it's what
+  covers the all-cached-nothing-changed path). Added `flush=True` to
+  every per-target `print()` in `_execute` (the preflight FAIL line,
+  SKIP, cached, the verb line, and the stdout/stderr passthrough) so a
+  redirected run (`lirk test //... > log.txt`, the exact pattern both
+  prior assessments' verification batches used) doesn't lose its whole
+  progress log to Python's block-buffering on interruption.
+  `load_cache`'s fail-open-to-`{}` behavior on corrupt JSON was left
+  untouched, as instructed. New test in `test_cache.py`
+  (`test_save_leaves_no_temp_file_behind`). Did the manual
+  interruption test the task calls for (automating a real SIGTERM
+  mid-run is awkward): built a two-target scratch repo (`a:fast_test`
+  completes in under a second, `b:slow_test` sleeps 20s), ran `lirk
+  test //...` in the background redirected to a log file, sent
+  SIGTERM ~8s in (after `fast_test` had finished but while
+  `slow_test` was still sleeping), and confirmed: the log already
+  contained `PASS //a:fast_test` (flush worked), `.lirk-cache.json`
+  existed with exactly that one entry (incremental save worked,
+  unlike the review's Probe P where interrupting left *no* cache file
+  and discarded the completed result), no leftover `.tmp` file, and a
+  follow-up run showed `cached //a:fast_test` / re-ran `//b:slow_test`
+  correctly rather than redoing everything from scratch. Full suite:
+  78/78, run 3x clean in fresh shells (~70-75s each).
 
 ## 2026-07-27 (update 6)
 

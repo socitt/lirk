@@ -109,7 +109,10 @@ def _execute(
         summary.failed += 1
         if mode == "test" and target.type == "test":
             summary.tests_failed += 1
-        print(f"  FAIL   {label}: missing source file(s): {', '.join(missing)}")
+        print(
+            f"  FAIL   {label}: missing source file(s): {', '.join(missing)}",
+            flush=True,
+        )
     if not ok:
         return ok, summary
 
@@ -134,11 +137,11 @@ def _execute(
             summary.skipped += 1
             if is_test:
                 summary.tests_skipped += 1
-            print(f"  SKIP   {label}: dependency {dep_failure} failed")
+            print(f"  SKIP   {label}: dependency {dep_failure} failed", flush=True)
             continue
 
         if not force and not needs_build(cache_key, fp, cache):
-            print(f"  cached  {label}")
+            print(f"  cached  {label}", flush=True)
             summary.cached += 1
             if is_test:
                 summary.tests_cached += 1
@@ -153,21 +156,25 @@ def _execute(
 
         if result.ok:
             cache[cache_key] = fp
-            print(f"  {verb:6} {label}")
+            print(f"  {verb:6} {label}", flush=True)
             if is_test:
                 summary.tests_passed += 1
             else:
                 summary.built += 1
+            # Saved after every successful target, not just at the end
+            # of the loop, so an interruption (Ctrl-C, SIGTERM, an
+            # iSH-AOK crash) never discards results already computed.
+            save_cache(cache_path, cache)
         else:
             ok = False
             failed.add(label)
             summary.failed += 1
             if is_test:
                 summary.tests_failed += 1
-            print(f"  {verb:6} {label}: {result.message}")
+            print(f"  {verb:6} {label}: {result.message}", flush=True)
             for stream in (result.stdout, result.stderr):
                 if stream.strip():
-                    print(stream.rstrip())
+                    print(stream.rstrip(), flush=True)
 
     save_cache(cache_path, cache)
     return ok, summary

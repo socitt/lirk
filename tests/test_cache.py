@@ -92,6 +92,13 @@ class CacheFileTests(unittest.TestCase):
         self.cache_path.write_text("not valid json {{{")
         self.assertEqual(load_cache(self.cache_path), {})
 
+    def test_save_leaves_no_temp_file_behind(self):
+        save_cache(self.cache_path, {"//a:a_lib": "deadbeef"})
+
+        tmp_path = self.cache_path.with_name(self.cache_path.name + ".tmp")
+        self.assertFalse(tmp_path.exists())
+        self.assertTrue(self.cache_path.exists())
+
 
 class NeedsBuildTests(unittest.TestCase):
     def test_true_when_label_absent_from_cache(self):
