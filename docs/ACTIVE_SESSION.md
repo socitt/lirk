@@ -10,6 +10,41 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-27 (update 3)
+
+- **Follow-up assessment** (`docs/LIRK_ASSESSMENT.md`, second dogfooding
+  pass, 20 targets across backgammon/go/tictactoe/connect4): no new
+  bugs found. Agreed priority order: (1) verify multi-file
+  `library`/`test` targets before building `srcs` glob syntax, (2) add
+  a one-line pass/fail summary to `lirk test //...`/`lirk build //...`,
+  (3) drop `lirk run` from the roadmap. Skipping the doc-sync item
+  (not lirk's problem, per the assessment itself).
+- Item 1 (multi-file target verification) done — **no code change
+  needed**. Built a chess-shaped scratch repo (outside this repo, in
+  the session scratchpad) exercising both patterns the assessment
+  called out: (a) one `library` target with 3 `srcs`
+  (`pieces.py`/`board.py`/`moves.py`, sibling flat imports) plus one
+  `test` target with 2 `srcs`; (b) 3 single-file library targets
+  chained via `deps` (`moves_lib` depending on *two* other targets:
+  `:board_lib` and `:pieces_lib`), each with its own single-file test
+  target, plus a cross-package dep (`//utils:helpers`, root-relative
+  import, mirroring the `shared/term.py` convention) to also exercise
+  multiple deps across packages. `lirk build //...` and
+  `lirk test //...` both passed cleanly and consistently: 1 full-repo
+  run + 3 isolated per-package runs + 9 more full-repo runs (10
+  attempted, 9 completed inside the batch's time budget, 0 failures,
+  0 incorrect results) + a cache-hit rerun (`cached` on every target
+  the second time, `test //... ` immediately after a clean run). Two
+  runs briefly looked like hangs against a 15s per-run timeout;
+  isolated timing showed ~11s real wall-clock for the *pre-existing*
+  `tests/fixtures/sample_repo` fixture too under this session's
+  current environment load, so it's the already-documented
+  environment-level subprocess-spawn slowness (see `KNOWN_ISSUES.md`
+  / the assessment's own CPU-time note), not a lirk defect. Verdict:
+  both multi-file patterns chess is likely to want already work with
+  zero new `lirk` code — the assessment's suggestion to hold off on
+  `srcs` glob syntax until this was checked is confirmed correct.
+
 ## 2026-07-27 (update 2)
 
 - **Status**: Picked up `docs/LIRK_ASSESSMENT.md` (untracked hand-off
