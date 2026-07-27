@@ -69,6 +69,12 @@ def run_test(target: Target, root: Path) -> ActionResult:
     if not validation.ok:
         return validation
 
+    if not target.srcs:
+        # Belt-and-braces: _parse_target already rejects a `test`
+        # target with no srcs, so this shouldn't be reachable, but a
+        # target with zero srcs must never silently report success.
+        return ActionResult(target.label, False, "no srcs to run")
+
     pkg_dir = root / target.package
     stdout_parts = []
     stderr_parts = []

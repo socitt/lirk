@@ -183,6 +183,27 @@ to be attempted, and once done, what actually happened.
   shells (~66-67s each) -- two rather than three since this is a
   parse-layer change, not the subprocess/cache-execution axis the
   extra runs are meant to guard.
+- **Task 9 done.** `lirk/targets.py`: `_parse_target` now raises
+  `ConfigError` when `type == "test"` and `srcs` is empty (a
+  `library` with no srcs is still allowed). `lirk/actions.py`:
+  `run_test` also got a belt-and-braces guard returning a clean
+  failure (`"no srcs to run"`) if it's ever handed an empty-srcs test
+  target directly, bypassing the parser. Review C5: `run_test` looping
+  over zero srcs fell through to a bare `return ... True, "passed"` --
+  zero processes spawned, zero assertions checked, reported and
+  cached as a passing test. New tests in `test_targets.py` (empty-srcs
+  test rejected, empty-srcs library still allowed) and
+  `test_actions.py` (constructing a `Target` directly to exercise
+  `run_test`'s defensive path, since the parser now forbids the
+  scenario at the source). Found and fixed a collateral hit: the
+  pre-existing `test_duplicate_names_raise_config_error` fixture used
+  a `type = "test"` target with no `srcs` incidentally (it was testing
+  duplicate-name detection, not this rule), so it started raising the
+  new error before ever reaching the duplicate check -- added
+  `srcs = ["test_dup.py"]` to that fixture's second target. Checked no
+  other fixture `BUILD.lirk` has a test target with empty srcs. Full
+  suite: 75/75, run 2x clean in fresh shells (~66-68s each; parse-layer
+  change).
 
 ## 2026-07-27 (update 6)
 

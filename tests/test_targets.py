@@ -122,6 +122,7 @@ class ParseBuildFileTests(unittest.TestCase):
             [[target]]
             name = "dup"
             type = "test"
+            srcs = ["test_dup.py"]
             """
         )
         with self.assertRaisesRegex(ConfigError, "duplicate target name"):
@@ -138,6 +139,28 @@ class ParseBuildFileTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ConfigError, "'srcs'"):
             parse_build_file(path, package="pkg")
+
+    def test_test_target_with_no_srcs_raises_config_error(self):
+        path = self._write(
+            """
+            [[target]]
+            name = "empty_test"
+            type = "test"
+            """
+        )
+        with self.assertRaisesRegex(ConfigError, "must declare at least one src"):
+            parse_build_file(path, package="pkg")
+
+    def test_library_target_with_no_srcs_is_allowed(self):
+        path = self._write(
+            """
+            [[target]]
+            name = "empty_lib"
+            type = "library"
+            """
+        )
+        [target] = parse_build_file(path, package="pkg")
+        self.assertEqual(target.srcs, ())
 
     def test_unknown_key_raises_config_error(self):
         path = self._write(

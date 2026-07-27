@@ -86,6 +86,9 @@ def _parse_target(raw: dict, path: Path, package: str, index: int) -> Target:
     deps = _string_list(raw.get("deps", []), "deps", where)
     data = _string_list(raw.get("data", []), "data", where)
 
+    if type_ == "test" and not srcs:
+        raise ConfigError(f"{where}: a 'test' target must declare at least one src")
+
     return Target(
         name=name,
         type=type_,

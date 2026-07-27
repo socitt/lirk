@@ -130,6 +130,24 @@ class RunTestTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("test_second", result.message)
 
+    def test_fails_defensively_on_a_test_target_with_no_srcs(self):
+        # _parse_target already rejects this at parse time, but
+        # run_test must never silently report success if it somehow
+        # receives an empty srcs list (e.g. constructed directly, as
+        # here) -- looping over zero srcs must not fall through to ok.
+        empty_test = Target(
+            name="empty_test",
+            type="test",
+            srcs=(),
+            deps=(),
+            data=(),
+            package="a",
+        )
+
+        result = run_test(empty_test, FIXTURES / "sample_repo")
+
+        self.assertFalse(result.ok)
+
     def test_fails_when_source_file_missing_without_spawning_subprocess(self):
         graph = build_graph(FIXTURES / "missing_src_repo")
         # missing_src_repo's only target is a library; reuse its shape
