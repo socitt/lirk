@@ -22,7 +22,17 @@ class GraphError(Exception):
 
 
 def find_build_files(root: Path) -> list[Path]:
-    return sorted(root.rglob(BUILD_FILENAME))
+    """Every BUILD.lirk under root, except under a dot-prefixed
+    directory (.venv, node_modules/.bin, a nested checkout of lirk
+    itself, etc.) -- checked relative to root, so root itself living
+    under a dotted ancestor directory doesn't matter."""
+    found = []
+    for path in root.rglob(BUILD_FILENAME):
+        rel_dir = path.relative_to(root).parent
+        if any(part.startswith(".") for part in rel_dir.parts):
+            continue
+        found.append(path)
+    return sorted(found)
 
 
 def package_for(build_file: Path, root: Path) -> str:

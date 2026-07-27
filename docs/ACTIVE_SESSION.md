@@ -273,6 +273,23 @@ to be attempted, and once done, what actually happened.
   follow-up run showed `cached //a:fast_test` / re-ran `//b:slow_test`
   correctly rather than redoing everything from scratch. Full suite:
   78/78, run 3x clean in fresh shells (~70-75s each).
+- **Task 13 done.** `lirk/graph.py`: `find_build_files` now filters
+  out any `BUILD.lirk` whose path, relative to `root`, has a
+  dot-prefixed directory component (checked relative to root, so root
+  itself living under a dotted ancestor is unaffected). Review D2/Probe
+  O: an unconditional `root.rglob()` picked up a vendored `BUILD.lirk`
+  under e.g. `.venv/`, and its missing source file crashed the entire
+  repo-wide build via C3 -- a nested checkout of lirk itself would hit
+  the same thing. New test in `test_graph.py`
+  (`FindBuildFilesTests`): copies `sample_repo`, adds a
+  `.hidden/vendored/BUILD.lirk` declaring a target with a missing src,
+  asserts `build_graph` only sees the original six targets. Verified
+  load-bearing: reverted to the unconditional `rglob` via `Edit`,
+  confirmed the test fails (`//.hidden/vendored:vendored` leaks into
+  the graph), restored, confirmed the diff matched intent. Full suite:
+  79/79, run 2x clean in fresh shells (~70-76s each; graph-scan
+  change, not the subprocess/cache axis, so two runs rather than
+  three).
 
 ## 2026-07-27 (update 6)
 

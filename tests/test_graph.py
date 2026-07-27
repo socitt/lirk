@@ -1,3 +1,5 @@
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -33,6 +35,37 @@ class BuildGraphTests(unittest.TestCase):
     def test_self_dependency_raises_graph_error(self):
         with self.assertRaisesRegex(GraphError, "cannot depend on itself"):
             build_graph(FIXTURES / "self_dep_repo")
+
+
+class FindBuildFilesTests(unittest.TestCase):
+    def test_ignores_a_build_file_under_a_dot_directory(self):
+        # A BUILD.lirk under .venv/, node_modules/, a nested checkout,
+        # etc. must not be picked up -- it belongs to something
+        # vendored, not this repo, and (per review D2/Probe O) could
+        # otherwise crash an unrelated repo-wide build if it declares
+        # a missing source file.
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", root)
+
+        hidden = root / ".hidden" / "vendored"
+        hidden.mkdir(parents=True)
+        (hidden / "BUILD.lirk").write_text(
+            '[[target]]\nname = "vendored"\ntype = "library"\n'
+            'srcs = ["nope.py"]\n'
+        )
+
+        graph = build_graph(root)
+
+        self.assertEqual(
+            set(graph.targets),
+            {
+                "//a:a_lib", "//a:a_test",
+                "//b:b_lib", "//b:b_test",
+                "//c:c_lib", "//c:c_test",
+            },
+        )
 
 
 class TopologicalSortTests(unittest.TestCase):
