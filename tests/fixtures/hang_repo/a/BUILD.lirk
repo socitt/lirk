@@ -1,0 +1,4 @@
+[[target]]
+name = "hang_test"
+type = "test"
+srcs = ["test_hang.py"]

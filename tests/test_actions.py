@@ -1,6 +1,8 @@
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from lirk import actions
 from lirk.actions import run_test, validate_target
 from lirk.graph import build_graph
 from lirk.targets import Target
@@ -137,6 +139,16 @@ class RunTestTests(unittest.TestCase):
         result = run_test(target, FIXTURES / "stdin_repo")
 
         self.assertTrue(result.ok, result.stderr)
+
+    def test_hung_test_is_killed_and_reported_as_a_clean_failure(self):
+        graph = build_graph(FIXTURES / "hang_repo")
+        target = graph.targets["//a:hang_test"]
+
+        with patch.object(actions, "TEST_TIMEOUT_SECONDS", 0.5):
+            result = run_test(target, FIXTURES / "hang_repo")
+
+        self.assertFalse(result.ok)
+        self.assertIn("timed out", result.message)
 
     def test_fails_defensively_on_a_test_target_with_no_srcs(self):
         # _parse_target already rejects this at parse time, but

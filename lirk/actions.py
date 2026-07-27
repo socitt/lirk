@@ -17,6 +17,15 @@ from pathlib import Path
 
 from lirk.targets import Target
 
+# Chosen so it doesn't trip on the slowest known test target (~12s,
+# backgammon:main_test). subprocess.run's timeout only kills the
+# direct child, not any grandchild a main_test.py may have spawned
+# itself (e.g. a main.py it drives) -- killing the whole tree needs a
+# process group, which this project's process model forbids. A
+# partially-cleaned-up timeout is accepted as strictly better than an
+# unbounded hang.
+TEST_TIMEOUT_SECONDS = 600
+
 
 @dataclass
 class ActionResult:
@@ -90,14 +99,26 @@ def run_test(target: Target, root: Path) -> ActionResult:
 
     for src in target.srcs:
         module = Path(src).stem
-        proc = subprocess.run(
-            [sys.executable, "-m", "unittest", module],
-            cwd=pkg_dir,
-            capture_output=True,
-            text=True,
-            env=env,
-            stdin=subprocess.DEVNULL,
-        )
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "unittest", module],
+                cwd=pkg_dir,
+                capture_output=True,
+                text=True,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                timeout=TEST_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as e:
+            stdout_parts.append(e.stdout or "")
+            stderr_parts.append(e.stderr or "")
+            return ActionResult(
+                target.label,
+                False,
+                f"{module} timed out after {TEST_TIMEOUT_SECONDS}s",
+                "\n".join(stdout_parts),
+                "\n".join(stderr_parts),
+            )
         stdout_parts.append(proc.stdout)
         stderr_parts.append(proc.stderr)
         if proc.returncode != 0:

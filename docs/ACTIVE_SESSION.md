@@ -223,6 +223,28 @@ to be attempted, and once done, what actually happened.
   exact failure mode from review Probe E. Restored, confirmed `git
   diff` showed only the intended two-line change. Full suite: 76/76,
   run 3x clean in fresh shells (~67-71s each).
+- **Task 11 done.** `lirk/actions.py`: new `TEST_TIMEOUT_SECONDS = 600`
+  module constant (600 chosen so it doesn't trip on the ~12s
+  `backgammon:main_test`, per the review); `run_test`'s
+  `subprocess.run` call now passes `timeout=TEST_TIMEOUT_SECONDS` and
+  is wrapped in `try/except subprocess.TimeoutExpired`, returning a
+  clean `"{module} timed out after {N}s"` failure (with whatever
+  partial stdout/stderr the exception captured) instead of hanging.
+  Documented the known limitation as a comment rather than fixing it,
+  per the task and the review: `subprocess.run`'s timeout only kills
+  the direct child, so a `main_test.py` that spawned its own `main.py`
+  grandchild could leave it running -- killing the whole tree needs a
+  process group, which this project's process model forbids, so the
+  partial cleanup is accepted rather than reaching for
+  `start_new_session`. Bumped `ACTION_VERSION` to 4. New fixture
+  `tests/fixtures/hang_repo/` (a test that sleeps 5s) plus a test in
+  `test_actions.py` patching `TEST_TIMEOUT_SECONDS` down to 0.5s via
+  `unittest.mock.patch.object` so the suite doesn't actually wait 600s
+  (or even 5s) to prove the timeout fires. Verified load-bearing:
+  removed the `try/except`+`timeout=` via `Edit`, confirmed the test
+  fails (`True is not false` -- it just waited out the 5s sleep and
+  reported PASS), restored, confirmed the diff matched intent. Full
+  suite: 77/77, run 3x clean in fresh shells (~68-70s each).
 
 ## 2026-07-27 (update 6)
 
