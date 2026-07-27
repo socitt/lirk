@@ -6,4 +6,4 @@ srcs = ["one.py", "two.py", "three.py"]
 [[target]]
 name = "multi_test"
 type = "test"
-srcs = ["test_first.py", "test_second.py"]
+srcs = ["test_first.py", "test_second.py", "test_third.py"]

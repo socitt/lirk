@@ -87,6 +87,7 @@ def run_test(target: Target, root: Path) -> ActionResult:
     pkg_dir = root / target.package
     stdout_parts = []
     stderr_parts = []
+    failed_modules: list[str] = []
 
     env = os.environ.copy()
     root_str = str(root.resolve())
@@ -122,13 +123,17 @@ def run_test(target: Target, root: Path) -> ActionResult:
         stdout_parts.append(proc.stdout)
         stderr_parts.append(proc.stderr)
         if proc.returncode != 0:
-            return ActionResult(
-                target.label,
-                False,
-                f"{module} failed (exit {proc.returncode})",
-                "\n".join(stdout_parts),
-                "\n".join(stderr_parts),
-            )
+            failed_modules.append(module)
+
+    if failed_modules:
+        return ActionResult(
+            target.label,
+            False,
+            f"{len(failed_modules)} of {len(target.srcs)} src files failed: "
+            f"{', '.join(failed_modules)}",
+            "\n".join(stdout_parts),
+            "\n".join(stderr_parts),
+        )
 
     return ActionResult(
         target.label, True, "passed", "\n".join(stdout_parts), "\n".join(stderr_parts)

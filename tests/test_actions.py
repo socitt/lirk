@@ -140,6 +140,21 @@ class RunTestTests(unittest.TestCase):
 
         self.assertTrue(result.ok, result.stderr)
 
+    def test_all_srcs_run_even_after_an_earlier_one_fails(self):
+        # multi_test's srcs are test_first (passes), test_second
+        # (fails), test_third (fails). Stopping at the first failure
+        # would silently hide test_third entirely -- run_test must
+        # keep going and report every failure, not just the first.
+        graph = build_graph(FIXTURES / "multisrc_repo")
+        target = graph.targets["//a:multi_test"]
+
+        result = run_test(target, FIXTURES / "multisrc_repo")
+
+        self.assertFalse(result.ok)
+        self.assertIn("2 of 3", result.message)
+        self.assertIn("test_second", result.message)
+        self.assertIn("test_third", result.message)
+
     def test_hung_test_is_killed_and_reported_as_a_clean_failure(self):
         graph = build_graph(FIXTURES / "hang_repo")
         target = graph.targets["//a:hang_test"]

@@ -290,6 +290,31 @@ to be attempted, and once done, what actually happened.
   79/79, run 2x clean in fresh shells (~70-76s each; graph-scan
   change, not the subprocess/cache axis, so two runs rather than
   three).
+- **Task 14 done** (all MEDIUM items now closed; only LOW remains).
+  `lirk/actions.py`: `run_test`'s loop no longer returns immediately
+  on the first non-zero exit -- it now collects failed module names
+  in `failed_modules` and keeps running every remaining src, returning
+  a single `ActionResult` at the end (`"N of M src files failed:
+  mod1, mod2"`) only if `failed_modules` is non-empty, still one
+  `subprocess.run` per src file. Bumped `ACTION_VERSION` to 5. Review
+  D4: stopping at the first failure was invisible while every fixture
+  had one src, but `c43a787` explicitly endorsed multi-src as the
+  pattern for chess, so a failing `test_moves.py` would silently hide
+  `test_castling.py` entirely. Extended `multisrc_repo`'s `multi_test`
+  target (from task 6) with a third src, `test_third.py` (also
+  fails), so the fixture actually exercises "an earlier failure
+  doesn't hide a later one" rather than just "the second of two src
+  files is reported," which the old stop-at-first-failure code already
+  handled correctly. New test
+  `test_all_srcs_run_even_after_an_earlier_one_fails` asserts both
+  `test_second` and `test_third` appear in the message. Verified
+  load-bearing: reverted to the old return-immediately behavior via
+  `Edit`, confirmed the test fails (`test_third` never ran, message
+  was just `test_second failed (exit 1)`), restored, confirmed the
+  diff matched intent. Task 6's existing mutation test still passes
+  unchanged since it only checks `result.ok` and `"test_second" in
+  message`, both still true with three srcs. Full suite: 80/80, run
+  3x clean in fresh shells (~80-83s each).
 
 ## 2026-07-27 (update 6)
 
