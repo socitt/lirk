@@ -10,6 +10,22 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-27 (update 8)
+
+- **Review-driven work fully closed out.** All 18 tasks from the
+  2026-07-26 architecture review are done (see update 7 below and
+  `git log` for the individual commits, `d306ba4`..`88102cc`). Moved
+  `TASKS.md` to `docs/reviews/2026-07-26-tasks-completed.md` with a
+  completion header, original content preserved below it unchanged;
+  added a short pointer at
+  `docs/assessments/2026-07-26-tasks-completed-summary.md`. Nothing
+  in progress. Full suite: 91/91.
+- **Next up:** nothing specific queued. If chess support work in
+  `terminal-projects` resumes and needs anything from `lirk`, that's
+  the next real thing to look at; otherwise this is ready for the
+  next real-world dogfooding target or the next review cycle,
+  whichever comes first.
+
 ## 2026-07-27 (update 7)
 
 - **Committed the architecture review** (`docs/reviews/2026-07-26-architecture-review.md`,
