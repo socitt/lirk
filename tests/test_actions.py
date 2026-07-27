@@ -92,6 +92,20 @@ class RunTestTests(unittest.TestCase):
         self.assertIn("failed", result.message)
         self.assertIn("FAILED", result.stderr)
 
+    def test_passes_for_a_root_relative_import(self):
+        # thing_test.py does `from pkg.thing import value`, which only
+        # resolves if the repo root is on PYTHONPATH -- every other
+        # fixture uses a flat sibling import, so this is the only
+        # regression test for run_test's env=env PYTHONPATH fix
+        # (428c517), the one production bug this tool has ever had.
+        graph = build_graph(FIXTURES / "rootimport_repo")
+        target = graph.targets["//pkg:thing_test"]
+
+        result = run_test(target, FIXTURES / "rootimport_repo")
+
+        self.assertTrue(result.ok, result.stderr)
+        self.assertEqual(result.message, "passed")
+
     def test_fails_when_source_file_missing_without_spawning_subprocess(self):
         graph = build_graph(FIXTURES / "missing_src_repo")
         # missing_src_repo's only target is a library; reuse its shape

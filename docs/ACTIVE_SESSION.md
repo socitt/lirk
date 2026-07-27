@@ -117,6 +117,20 @@ to be attempted, and once done, what actually happened.
   contradictory-looking output (`PASS`/`cached` above `lirk: FAILED`),
   restored. Full suite: 66/66, run 3x clean in fresh shells (~44-46s
   each).
+- **Task 5 done.** No source change -- pure regression-test gap
+  closure (review T1). New fixture `tests/fixtures/rootimport_repo/`
+  (`pkg/thing.py`, `pkg/test_thing.py` doing `from pkg.thing import
+  value`, the root-relative form every other fixture avoids by using
+  flat sibling imports) plus one new test
+  `test_passes_for_a_root_relative_import` in `test_actions.py`.
+  Verified load-bearing per the task's own acceptance criterion:
+  temporarily removed `env=env` from the `subprocess.run` call in
+  `lirk/actions.py:run_test` via `Edit` (not `git checkout`, per the
+  lesson from tasks 2/3), confirmed the new test fails with
+  `ModuleNotFoundError: No module named 'pkg'` -- the exact bug
+  `428c517` fixed -- then restored the line and confirmed `git diff
+  lirk/actions.py` was empty before re-running the suite. Full suite:
+  67/67, run 3x clean in fresh shells (~46-54s each).
 
 ## 2026-07-27 (update 6)
 
