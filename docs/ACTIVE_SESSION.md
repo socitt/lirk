@@ -360,6 +360,24 @@ to be attempted, and once done, what actually happened.
   is `""`) and `test_cli.py` (`lirk build //:root_lib` works
   end-to-end). Full suite: 90/90, run 2x clean in fresh shells
   (~60-61s each).
+- **Task 18 done -- this closes out TASKS.md, all 18 items.** New
+  test in `test_cli.py` (`BuildFileEditInvalidationTests`): runs a
+  build on a `sample_repo` copy, edits `a/BUILD.lirk` to add
+  `//c:c_lib` as a second dep of `a_lib` (was just `//b:b_lib`), runs
+  again, and asserts `a_lib` re-runs (`built`, not `cached`) while its
+  unrelated siblings `b_lib`/`c_lib` stay `cached`. Review T8/D5:
+  editing a `BUILD.lirk` to add a dep or src already correctly
+  invalidates the affected target today (the srcs list and resolved
+  dep labels both feed `compute_fingerprints`), but nothing protected
+  that behaviour end-to-end. No source change -- TASKS.md doesn't ask
+  for a mutation-verification step on this one (unlike tasks 6/7/14/
+  15), and on inspection there isn't a clean single-line mutation that
+  would isolate "a newly declared dep is invisible" from what task
+  7's mutation already covers (removing the dep-fingerprint-folding
+  line breaks both the same way, since either mutation removes an
+  iteration of the same loop) -- so this task rests on the test simply
+  passing, which it does. Full suite: 91/91, run 3x clean in fresh
+  shells (~62-65s each).
 
 ## 2026-07-27 (update 6)
 

@@ -188,6 +188,37 @@ class TestCommandTests(unittest.TestCase):
         self.assertIn("lirk: 0/1 tests passed", out2)
 
 
+class BuildFileEditInvalidationTests(unittest.TestCase):
+    # Editing a BUILD.lirk to add a dep or a src already correctly
+    # invalidates the affected targets (both the srcs list and the
+    # resolved dep labels are hashed by compute_fingerprints), but
+    # nothing protected that behaviour end-to-end (review T8/D5).
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def test_adding_a_dep_reruns_the_affected_target_not_its_unrelated_siblings(self):
+        _run(["build", "//..."], self.root)
+
+        build_file = self.root / "a" / "BUILD.lirk"
+        build_file.write_text(
+            build_file.read_text().replace(
+                'deps = ["//b:b_lib"]',
+                'deps = ["//b:b_lib", "//c:c_lib"]',
+            )
+        )
+
+        code, out = _run(["build", "//..."], self.root)
+
+        self.assertEqual(code, 0)
+        self.assertIn("built  //a:a_lib", out)
+        self.assertNotIn("cached  //a:a_lib", out)
+        for label in ("//b:b_lib", "//c:c_lib"):
+            self.assertIn(f"cached  {label}", out)
+
+
 class RootPackageTests(unittest.TestCase):
     # targets.py and graph.py:package_for both have explicit handling
     # for a package at the repo root ("" -> //:name), but sample_repo
