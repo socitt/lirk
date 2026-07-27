@@ -42,6 +42,12 @@ class BuildGraphTests(unittest.TestCase):
         with self.assertRaisesRegex(GraphError, "cannot depend on itself"):
             build_graph(FIXTURES / "self_dep_repo")
 
+    def test_a_build_file_at_the_repo_root_uses_the_bare_label_form(self):
+        graph = build_graph(FIXTURES / "root_package_repo")
+
+        self.assertEqual(set(graph.targets), {"//:root_lib"})
+        self.assertEqual(graph.targets["//:root_lib"].package, "")
+
 
 class ResolveLabelTests(unittest.TestCase):
     def test_absolute_label_without_a_colon_is_malformed_not_missing(self):

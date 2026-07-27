@@ -350,6 +350,16 @@ to be attempted, and once done, what actually happened.
   confirmed all three new malformed-label tests fail (`GraphError not
   raised`), restored, confirmed the diff matched intent. Full suite:
   88/88, run 2x clean in fresh shells (~61-62s each).
+- **Task 17 done.** No source change -- pure test-coverage gap
+  closure (review T7). New fixture `tests/fixtures/root_package_repo/`
+  with a `BUILD.lirk` directly at the repo root (deliberately a new
+  fixture rather than adding one to `sample_repo`, which nearly every
+  other CLI test depends on and whose count assertions like `lirk: 6
+  built` would otherwise break). New tests: `test_graph.py`
+  (`build_graph` resolves the bare `//:root_lib` label form, package
+  is `""`) and `test_cli.py` (`lirk build //:root_lib` works
+  end-to-end). Full suite: 90/90, run 2x clean in fresh shells
+  (~60-61s each).
 
 ## 2026-07-27 (update 6)
 

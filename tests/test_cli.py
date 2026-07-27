@@ -188,6 +188,28 @@ class TestCommandTests(unittest.TestCase):
         self.assertIn("lirk: 0/1 tests passed", out2)
 
 
+class RootPackageTests(unittest.TestCase):
+    # targets.py and graph.py:package_for both have explicit handling
+    # for a package at the repo root ("" -> //:name), but sample_repo
+    # (used by nearly every other CLI test) has no BUILD.lirk at its
+    # own root, so this path was unexercised end-to-end. Using a
+    # dedicated fixture rather than adding a root BUILD.lirk to
+    # sample_repo, which would perturb its existing count assertions
+    # (e.g. "lirk: 6 built").
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "root_package_repo", self.root)
+
+    def test_build_of_a_root_package_target_works(self):
+        code, out = _run(["build", "//:root_lib"], self.root)
+
+        self.assertEqual(code, 0)
+        self.assertIn("built  //:root_lib", out)
+        self.assertIn("lirk: OK", out)
+
+
 class IncrementalRebuildTests(unittest.TestCase):
     # sample_repo is a linear //a:a_lib -> //b:b_lib -> //c:c_lib chain
     # (a depends on b, b depends on c). test_cache.py proves the

@@ -1,0 +1,4 @@
+[[target]]
+name = "root_lib"
+type = "library"
+srcs = ["root_thing.py"]
