@@ -45,7 +45,28 @@ to be attempted, and once done, what actually happened.
   with a deliberate syntax error) backs a unit test on
   `validate_target` directly and a CLI-level test on `lirk build`.
   Full suite: 46/46 passing (44 prior + 2 new).
-- Next: item 4, `--root` flag + upward repo-root discovery.
+- Item 4 done: added an explicit `--root <path>` flag to both `build`
+  and `test` (`lirk/cli.py`), and `_discover_root()`, which walks
+  upward from `cwd` for a `.lirk-root` marker file and falls back to
+  `cwd` unchanged if none is found anywhere above it — so repos that
+  haven't adopted the marker keep today's exact behavior; this only
+  changes anything for repos that opt in by dropping an empty
+  `.lirk-root` file at their top level. Precedence: explicit `root=`
+  kwarg (test harness) > `--root` flag > marker discovery > cwd
+  fallback. New tests: `DiscoverRootTests` (unit tests on
+  `_discover_root` directly, no chdir) and
+  `RootDiscoveryEndToEndTests` (real `os.chdir` into a fixture
+  subdirectory, verifying `lirk build` from `//a` correctly resolves
+  a marker at the repo root and sees `//b:b_lib`; `os.chdir` restored
+  via `addCleanup`). Full suite: 51/51 passing (46 prior + 5 new).
+  Manually reproduced the assessment's described failure mode
+  end-to-end: running from a subdirectory *without* the marker fails
+  with `dependency '//b:b_lib' does not exist` (silent wrong-scope,
+  exactly as described); *with* the marker present, the same command
+  resolves correctly. README documents the marker and `--root` flag.
+- All four planned items from `docs/LIRK_ASSESSMENT.md` are now done.
+  Next: decide the assessment file's fate (archive vs. fold into
+  `KNOWN_ISSUES.md`), commit, push.
 
 ## 2026-07-27
 

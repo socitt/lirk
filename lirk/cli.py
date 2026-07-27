@@ -21,6 +21,22 @@ from lirk.graph import Graph, GraphError, build_graph, topological_sort, transit
 from lirk.targets import ConfigError
 
 ALL_TARGETS = "//..."
+ROOT_MARKER = ".lirk-root"
+
+
+def _discover_root(start: Path) -> Path:
+    """Walk upward from `start` for a `.lirk-root` marker file naming
+    the repo root explicitly.
+
+    Falls back to `start` unchanged if no marker is found in any
+    ancestor, so repos that haven't added the marker keep today's
+    cwd-as-root behavior -- this only changes anything for repos that
+    opt in.
+    """
+    for candidate in (start, *start.parents):
+        if (candidate / ROOT_MARKER).is_file():
+            return candidate
+    return start
 
 
 def _load_graph(root: Path) -> tuple[Graph, list[str]] | None:
@@ -141,12 +157,18 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lirk")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    root_help = (
+        "repo root (default: nearest ancestor of cwd containing a "
+        f"{ROOT_MARKER} marker file, else cwd itself)"
+    )
+
     build_p = sub.add_parser("build", help="validate a target and its deps")
     build_p.add_argument("label", help="//path:target or //...")
     build_p.add_argument(
         "--force", "--rebuild", action="store_true", dest="force",
         help="bypass the cache and re-validate every target in scope",
     )
+    build_p.add_argument("--root", type=Path, default=None, help=root_help)
 
     test_p = sub.add_parser("test", help="run a test target")
     test_p.add_argument("label", help="//path:target or //...")
@@ -154,9 +176,11 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         "--force", "--rerun", action="store_true", dest="force",
         help="bypass the cache and re-run every test in scope",
     )
+    test_p.add_argument("--root", type=Path, default=None, help=root_help)
 
     args = parser.parse_args(argv)
-    root = root if root is not None else Path.cwd()
+    if root is None:
+        root = args.root if args.root is not None else _discover_root(Path.cwd())
 
     if args.command == "build":
         return cmd_build(root, args.label, force=args.force)

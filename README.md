@@ -63,6 +63,18 @@ __pycache__/
 `.lirk-cache.json` is lirk's incremental-build cache, written at the
 repo root; it's local state, not something to commit or share.
 
+### Repo root
+
+lirk needs to know your repo root to scope its target search and
+resolve `//`-prefixed labels. By default it uses the current
+directory, walking upward for a `.lirk-root` marker file first — drop
+an empty `.lirk-root` at your repo's top level and `lirk build`/`lirk
+test` will find it correctly even when run from a subdirectory.
+Without the marker, lirk silently scopes to whatever directory it was
+invoked from, which can make targets outside that subtree look
+"missing" rather than out of scope. `--root <path>` overrides
+discovery entirely.
+
 ## Status
 
 Early development. Not yet self-hosting — lirk is tested with plain

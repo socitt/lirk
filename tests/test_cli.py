@@ -1,11 +1,12 @@
 import contextlib
 import io
+import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
-from lirk.cli import main
+from lirk.cli import _discover_root, main
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -142,6 +143,62 @@ class TestCommandTests(unittest.TestCase):
         # but a_test failed and must be retried, not skipped.
         self.assertIn("cached  //a:a_lib", out2)
         self.assertNotIn("cached  //a:a_test", out2)
+
+
+class DiscoverRootTests(unittest.TestCase):
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.repo_root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.repo_root)
+
+    def test_falls_back_to_start_when_no_marker_present(self):
+        nested = self.repo_root / "a"
+        self.assertEqual(_discover_root(nested), nested)
+
+    def test_finds_marker_in_an_ancestor(self):
+        (self.repo_root / ".lirk-root").touch()
+        nested = self.repo_root / "a"
+
+        self.assertEqual(_discover_root(nested), self.repo_root)
+
+    def test_start_itself_can_be_the_marked_root(self):
+        (self.repo_root / ".lirk-root").touch()
+        self.assertEqual(_discover_root(self.repo_root), self.repo_root)
+
+
+class RootDiscoveryEndToEndTests(unittest.TestCase):
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.repo_root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.repo_root)
+        (self.repo_root / ".lirk-root").touch()
+
+        original_cwd = os.getcwd()
+        self.addCleanup(os.chdir, original_cwd)
+
+    def test_build_from_a_subdirectory_finds_the_real_root_via_marker(self):
+        os.chdir(self.repo_root / "a")
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = main(["build", "//a:a_lib"])  # no --root, no root= override
+
+        self.assertEqual(code, 0)
+        self.assertIn("//a:a_lib", out.getvalue())
+        self.assertIn("//b:b_lib", out.getvalue())
+        self.assertIn("lirk: OK", out.getvalue())
+
+    def test_root_flag_overrides_discovery(self):
+        os.chdir(self.repo_root / "a")
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = main(["build", "//a:a_lib", "--root", str(self.repo_root)])
+
+        self.assertEqual(code, 0)
+        self.assertIn("lirk: OK", out.getvalue())
 
 
 if __name__ == "__main__":
