@@ -204,6 +204,25 @@ to be attempted, and once done, what actually happened.
   other fixture `BUILD.lirk` has a test target with empty srcs. Full
   suite: 75/75, run 2x clean in fresh shells (~66-68s each; parse-layer
   change).
+- **Task 10 done.** `lirk/actions.py`: `run_test`'s `subprocess.run`
+  call gained `stdin=subprocess.DEVNULL` -- the only change; bumped
+  `ACTION_VERSION` to 3 in `lirk/cache.py`. Review C7: test
+  subprocesses previously inherited lirk's own stdin, so a test
+  reading stdin on an interactive terminal would block forever
+  consuming the user's keystrokes, with no output since stdout is
+  still buffered (ties into C8/task 11). New fixture
+  `tests/fixtures/stdin_repo/` (`test_stdin.py` asserts
+  `sys.stdin.readline() == ""`) plus a unit test in `test_actions.py`.
+  Did the manual verification the task calls for: piped `printf
+  'x\n'` into a real `lirk test` invocation against a scratch copy of
+  the fixture -- confirmed clean `PASS` (EOF, not `x`) with the fix in
+  place. Verified load-bearing by temporarily removing
+  `stdin=subprocess.DEVNULL` via `Edit`: the same manual invocation
+  then showed the child actually reading `x` from the parent's stdin
+  and failing its assertion (`AssertionError: 'x\n' != ''`) -- the
+  exact failure mode from review Probe E. Restored, confirmed `git
+  diff` showed only the intended two-line change. Full suite: 76/76,
+  run 3x clean in fresh shells (~67-71s each).
 
 ## 2026-07-27 (update 6)
 

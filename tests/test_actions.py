@@ -130,6 +130,14 @@ class RunTestTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("test_second", result.message)
 
+    def test_child_does_not_inherit_lirks_stdin(self):
+        graph = build_graph(FIXTURES / "stdin_repo")
+        target = graph.targets["//a:stdin_test"]
+
+        result = run_test(target, FIXTURES / "stdin_repo")
+
+        self.assertTrue(result.ok, result.stderr)
+
     def test_fails_defensively_on_a_test_target_with_no_srcs(self):
         # _parse_target already rejects this at parse time, but
         # run_test must never silently report success if it somehow

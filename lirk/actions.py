@@ -96,6 +96,7 @@ def run_test(target: Target, root: Path) -> ActionResult:
             capture_output=True,
             text=True,
             env=env,
+            stdin=subprocess.DEVNULL,
         )
         stdout_parts.append(proc.stdout)
         stderr_parts.append(proc.stderr)

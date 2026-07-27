@@ -1,0 +1,4 @@
+[[target]]
+name = "stdin_test"
+type = "test"
+srcs = ["test_stdin.py"]
