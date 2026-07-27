@@ -188,6 +188,46 @@ class TestCommandTests(unittest.TestCase):
         self.assertIn("lirk: 0/1 tests passed", out2)
 
 
+class IncrementalRebuildTests(unittest.TestCase):
+    # sample_repo is a linear //a:a_lib -> //b:b_lib -> //c:c_lib chain
+    # (a depends on b, b depends on c). test_cache.py proves the
+    # *fingerprints* change on an edit; these prove the *CLI* actually
+    # acts on that -- that a `lirk test //...` re-run after editing a
+    # transitive dependency's source really re-executes the affected
+    # tests instead of reporting `cached`, and that unrelated targets
+    # are correctly left cached rather than needlessly rebuilt.
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def test_editing_the_base_dependency_reruns_every_dependent(self):
+        _run(["test", "//..."], self.root)
+
+        (self.root / "c" / "c.py").write_text('def greet():\n    return "c"  # edited\n')
+
+        code, out = _run(["test", "//..."], self.root)
+
+        self.assertEqual(code, 0)
+        for label in ("//c:c_test", "//b:b_test", "//a:a_test"):
+            self.assertIn(f"PASS   {label}", out)
+            self.assertNotIn(f"cached  {label}", out)
+
+    def test_editing_a_leaf_target_leaves_unrelated_targets_cached(self):
+        _run(["test", "//..."], self.root)
+
+        (self.root / "a" / "a.py").write_text('def greet():\n    return "a"  # edited\n')
+
+        code, out = _run(["test", "//..."], self.root)
+
+        self.assertEqual(code, 0)
+        for label in ("//c:c_test", "//b:b_test"):
+            self.assertIn(f"cached  {label}", out)
+        self.assertIn("PASS   //a:a_test", out)
+        self.assertNotIn("cached  //a:a_test", out)
+
+
 class FailedDependencySkipTests(unittest.TestCase):
     def setUp(self):
         tmpdir = tempfile.TemporaryDirectory()

@@ -146,6 +146,27 @@ to be attempted, and once done, what actually happened.
   loop, confirmed the test-target test fails the same way, restored;
   confirmed `git diff lirk/actions.py` was empty afterward. Full
   suite: 69/69, run 3x clean in fresh shells (~48-52s each).
+- **Task 7 done.** No source change -- pure regression-test gap
+  closure (review T3). `test_cache.py` already proved fingerprints
+  change after an edit; nothing proved the CLI acted on it. New tests
+  in `test_cli.py` (`IncrementalRebuildTests`), using the existing
+  linear `//a:a_lib -> //b:b_lib -> //c:c_lib` chain in `sample_repo`:
+  edit `c/c.py` (the base dependency) and assert all three test
+  targets show `PASS`/re-run, not `cached`; edit `a/a.py` (the leaf,
+  nothing depends on it) and assert `//b:b_test`/`//c:c_test` stay
+  `cached` while only `//a:a_test` re-runs. First attempt at the edits
+  changed each file's `greet()` return value the same way
+  `test_cache.py`'s fingerprint-only test does, which broke here
+  because these tests actually run the assertions -- `c.py`/`a.py`'s
+  own test module asserts on the literal return value, so the edit
+  has to perturb the fingerprint (e.g. append a comment) without
+  changing behavior. Fixed and verified load-bearing per the task's
+  acceptance criterion: removed the `h.update(fingerprints[dep]...)`
+  line from `compute_fingerprints` via `Edit`, confirmed both new
+  tests fail (dependents wrongly reported `cached`), restored,
+  confirmed `git diff lirk/cache.py` was empty. Full suite: 71/71,
+  run 3x clean in fresh shells (~70-154s each -- runtime is climbing
+  as fixtures accumulate; worth keeping an eye on per review D6).
 
 ## 2026-07-27 (update 6)
 
