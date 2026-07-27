@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from lirk.actions import run_test, validate_target
@@ -49,7 +50,23 @@ def _load_graph(root: Path) -> tuple[Graph, list[str]] | None:
     return graph, order
 
 
-def _execute(root: Path, graph: Graph, order: list[str], mode: str, force: bool = False) -> bool:
+@dataclass
+class ExecutionSummary:
+    built: int = 0
+    cached: int = 0
+    failed: int = 0
+    tests_passed: int = 0
+    tests_failed: int = 0
+    tests_cached: int = 0
+
+    @property
+    def tests_total(self) -> int:
+        return self.tests_passed + self.tests_failed + self.tests_cached
+
+
+def _execute(
+    root: Path, graph: Graph, order: list[str], mode: str, force: bool = False
+) -> tuple[bool, ExecutionSummary]:
     """Validate (and, in 'test' mode, run) each target in `order`.
 
     `mode` ('build' or 'test') namespaces the cache: `lirk build`
@@ -61,25 +78,30 @@ def _execute(root: Path, graph: Graph, order: list[str], mode: str, force: bool 
     re-validated/re-run regardless of its fingerprint, without
     touching the cache file itself.
 
-    Returns True iff everything succeeded. Only successful results are
-    written to the cache, so a failure is retried on the next run even
-    if its fingerprint hasn't changed.
+    Returns (ok, summary): `ok` is True iff everything succeeded.
+    Only successful results are written to the cache, so a failure is
+    retried on the next run even if its fingerprint hasn't changed.
     """
     cache_path = root / CACHE_FILENAME
     cache = load_cache(cache_path)
     fingerprints = compute_fingerprints(graph, root, order)
 
     ok = True
+    summary = ExecutionSummary()
     for label in order:
         target = graph.targets[label]
         fp = fingerprints[label]
         cache_key = f"{mode}:{label}"
+        is_test = mode == "test" and target.type == "test"
 
         if not force and not needs_build(cache_key, fp, cache):
             print(f"  cached  {label}")
+            summary.cached += 1
+            if is_test:
+                summary.tests_cached += 1
             continue
 
-        if mode == "test" and target.type == "test":
+        if is_test:
             result = run_test(target, root)
             verb = "PASS" if result.ok else "FAIL"
         else:
@@ -89,15 +111,22 @@ def _execute(root: Path, graph: Graph, order: list[str], mode: str, force: bool 
         if result.ok:
             cache[cache_key] = fp
             print(f"  {verb:6} {label}")
+            if is_test:
+                summary.tests_passed += 1
+            else:
+                summary.built += 1
         else:
             ok = False
+            summary.failed += 1
+            if is_test:
+                summary.tests_failed += 1
             print(f"  {verb:6} {label}: {result.message}")
             for stream in (result.stdout, result.stderr):
                 if stream.strip():
                     print(stream.rstrip())
 
     save_cache(cache_path, cache)
-    return ok
+    return ok, summary
 
 
 def cmd_build(root: Path, label: str, force: bool = False) -> int:
@@ -117,7 +146,11 @@ def cmd_build(root: Path, label: str, force: bool = False) -> int:
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
 
-    ok = _execute(root, graph, subset_order, mode="build", force=force)
+    ok, summary = _execute(root, graph, subset_order, mode="build", force=force)
+    print(
+        f"lirk: {summary.built} built, {summary.cached} cached, "
+        f"{summary.failed} failed"
+    )
     print("lirk: OK" if ok else "lirk: FAILED")
     return 0 if ok else 1
 
@@ -148,7 +181,9 @@ def cmd_test(root: Path, label: str, force: bool = False) -> int:
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
 
-    ok = _execute(root, graph, subset_order, mode="test", force=force)
+    ok, summary = _execute(root, graph, subset_order, mode="test", force=force)
+    passed = summary.tests_passed + summary.tests_cached
+    print(f"lirk: {passed}/{summary.tests_total} tests passed")
     print("lirk: OK" if ok else "lirk: FAILED")
     return 0 if ok else 1
 

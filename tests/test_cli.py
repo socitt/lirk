@@ -69,8 +69,31 @@ class BuildCommandTests(unittest.TestCase):
         code, out = _run(["build", "//...", "--force"], self.root)
 
         self.assertEqual(code, 0)
-        self.assertNotIn("cached", out)
+        self.assertNotIn("  cached  ", out)
         self.assertTrue((self.root / ".lirk-cache.json").exists())
+
+    def test_build_summary_line_counts_fresh_run(self):
+        code, out = _run(["build", "//..."], self.root)
+
+        self.assertEqual(code, 0)
+        self.assertIn("lirk: 6 built, 0 cached, 0 failed", out)
+
+    def test_build_summary_line_counts_cached_rerun(self):
+        _run(["build", "//..."], self.root)
+        code, out = _run(["build", "//..."], self.root)
+
+        self.assertEqual(code, 0)
+        self.assertIn("lirk: 0 built, 6 cached, 0 failed", out)
+
+    def test_build_summary_line_counts_a_failure(self):
+        syntax_root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, syntax_root, ignore_errors=True)
+        shutil.copytree(FIXTURES / "syntax_error_repo", syntax_root, dirs_exist_ok=True)
+
+        code, out = _run(["build", "//a:a"], syntax_root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("lirk: 0 built, 0 cached, 1 failed", out)
 
 
 class TestCommandTests(unittest.TestCase):
@@ -100,6 +123,12 @@ class TestCommandTests(unittest.TestCase):
         self.assertIn("//c:c_test", out)
         self.assertIn("lirk: OK", out)
 
+    def test_summary_line_counts_a_single_fresh_test(self):
+        code, out = _run(["test", "//c:c_test"], self.root)
+
+        self.assertEqual(code, 0)
+        self.assertIn("lirk: 1/1 tests passed", out)
+
     def test_rejects_a_non_test_target(self):
         code, out = _run(["test", "//c:c_lib"], self.root)
         self.assertEqual(code, 1)
@@ -111,12 +140,21 @@ class TestCommandTests(unittest.TestCase):
         for label in ("//a:a_test", "//b:b_test", "//c:c_test"):
             self.assertIn(label, out)
 
+    def test_summary_line_counts_all_fresh_tests(self):
+        code, out = _run(["test", "//..."], self.root)
+
+        self.assertEqual(code, 0)
+        self.assertIn("lirk: 3/3 tests passed", out)
+
     def test_second_run_skips_unchanged_passing_test(self):
         _run(["test", "//c:c_test"], self.root)
         code, out = _run(["test", "//c:c_test"], self.root)
 
         self.assertEqual(code, 0)
         self.assertIn("cached", out)
+        # A cached test previously passed, so it should still count
+        # toward the "passed" side of the summary, not be dropped.
+        self.assertIn("lirk: 1/1 tests passed", out)
 
     def test_force_reruns_unchanged_test_without_deleting_cache(self):
         _run(["test", "//c:c_test"], self.root)
@@ -143,6 +181,10 @@ class TestCommandTests(unittest.TestCase):
         # but a_test failed and must be retried, not skipped.
         self.assertIn("cached  //a:a_lib", out2)
         self.assertNotIn("cached  //a:a_test", out2)
+        # a_lib is a library dep, not a test target, so it must not
+        # inflate the test-summary denominator on either run.
+        self.assertIn("lirk: 0/1 tests passed", out1)
+        self.assertIn("lirk: 0/1 tests passed", out2)
 
 
 class DiscoverRootTests(unittest.TestCase):

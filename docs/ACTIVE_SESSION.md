@@ -10,6 +10,36 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-27 (update 4)
+
+- Item 2 (pass/fail summary line) done. `lirk/cli.py`: `_execute` now
+  returns an `ExecutionSummary` (built/cached/failed counts, plus
+  test-specific passed/failed/cached counts limited to `type ==
+  "test"` targets) alongside the existing bool. `cmd_build` prints
+  `lirk: N built, M cached, K failed`; `cmd_test` prints `lirk: P/T
+  tests passed` (T counts only test-type targets in scope, so a test
+  target's library deps don't inflate the denominator; a cached test
+  counts as passed since only successful runs are ever cached). Both
+  print before the existing `lirk: OK`/`FAILED` line, which is
+  unchanged.
+  New tests: build summary counts on a fresh run / cached rerun / a
+  failure; test summary on a single fresh test, all-fresh `//...`,
+  a cached rerun (still counts as passed), and the pre-existing
+  failing-test-repo case (confirms a library dep failure doesn't
+  inflate the test denominator). One pre-existing test
+  (`test_force_bypasses_cache_without_deleting_it`) had to be
+  tightened from `assertNotIn("cached", out)` to `assertNotIn("
+  cached  ", out)` since the new build summary's `0 cached` text
+  otherwise collides with a substring check that was really about the
+  per-target line, not the word.
+  Full suite (56/56, up from 51) run 3x clean; manual end-to-end
+  checks against `tests/fixtures/sample_repo` confirm fresh/cached
+  `build` and fresh `test` output all match. Also found and removed a
+  stray `.lirk-cache.json` left in `tests/fixtures/sample_repo` from
+  earlier item-1 manual comparisons — gitignored, never staged, but
+  was making a couple of `test_cli.py` tests fail spuriously
+  (`assertIn("PASS", ...)` seeing `cached` instead) until cleaned up.
+
 ## 2026-07-27 (update 3)
 
 - **Follow-up assessment** (`docs/LIRK_ASSESSMENT.md`, second dogfooding
