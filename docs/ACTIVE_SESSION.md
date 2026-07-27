@@ -54,6 +54,45 @@ to be attempted, and once done, what actually happened.
   reverted the `ACTION_VERSION` bump via `git checkout --`, caught and
   reapplied both edits before re-running the suite). Full suite:
   61/61, run 3x clean in fresh shells (~45-49s each).
+- **Task 3 done.** Missing/unreadable source files no longer crash
+  the CLI with a raw traceback. `lirk/cache.py`: new `CacheError`
+  exception; `_hash_file` now catches `OSError` and re-raises it
+  naming the target label and path (defense-in-depth for any direct
+  caller of `compute_fingerprints`, though the CLI itself never hits
+  this path anymore — see below). `lirk/actions.py`: extracted the
+  existence check out of `validate_target` into a new
+  `missing_files(target, root)` helper (checks both `srcs` and
+  `data`) so `cli.py` can reuse the exact same check/message;
+  `validate_target`'s `ast.parse`/`read_text()` try block now also
+  catches `UnicodeDecodeError`/`ValueError`, reporting `<src>: not
+  readable as Python source: <e>` instead of an uncaught exception.
+  `lirk/cli.py`: `_execute` now runs the `missing_files` check over
+  every target in scope *before* calling `compute_fingerprints`,
+  printing a normal `FAIL ... missing source file(s): ...` line per
+  affected target and returning early (nothing cached) if any are
+  found — this is what actually keeps `compute_fingerprints` from
+  ever seeing a missing file in the CLI path; wrapped the
+  `compute_fingerprints` call itself in `try/except CacheError` as a
+  second line of defense. New fixture `tests/fixtures/binary_src_repo/`
+  (a non-UTF-8 `.py` file) alongside the existing `missing_src_repo`.
+  New tests: `test_actions.py` (binary file → clean FAIL, not an
+  exception), `test_cli.py::MissingOrUnreadableSourceCliTests` (both
+  fixtures, asserting exit code 1, the offending filename in the
+  output, and no `Traceback`). Verified both CLI tests are
+  load-bearing: reverted the `cli.py` preflight (confirmed
+  `FileNotFoundError`/`CacheError` propagates as an uncaught
+  exception — test errors) and reverted the new `actions.py` except
+  clause (confirmed `UnicodeDecodeError` propagates uncaught) via
+  `Edit` rather than `git checkout --` this time, having learned from
+  task 2 that `git checkout -- <file>` reverts to the last *commit*,
+  not just the just-applied test patch, and silently discards
+  whatever of the task's real changes hadn't been committed yet (it
+  did exactly that to `cli.py` and `cache.py` during task 2's and
+  this task's verification steps respectively; both times caught
+  immediately via `git diff` and reapplied before moving on — no work
+  was lost, but it's a sharp edge worth not hitting a third time).
+  Restored both, then full suite: 64/64, run 3x clean in fresh shells
+  (~44-46s each).
 
 ## 2026-07-27 (update 6)
 

@@ -17,14 +17,22 @@ from lirk.graph import Graph
 
 CACHE_FILENAME = ".lirk-cache.json"
 
+
+class CacheError(Exception):
+    """A file needed to compute a fingerprint could not be read."""
+
+
 # Bump this whenever the behaviour of `validate_target` or `run_test`
 # changes, so existing caches are invalidated instead of trusting a
 # green result computed under different rules.
 ACTION_VERSION = 2
 
 
-def _hash_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _hash_file(path: Path, label: str) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as e:
+        raise CacheError(f"{label}: cannot read {path}: {e}") from e
 
 
 def compute_fingerprints(
@@ -48,12 +56,12 @@ def compute_fingerprints(
         for src in sorted(target.srcs):
             src_path = root / target.package / src
             h.update(src.encode())
-            h.update(_hash_file(src_path).encode())
+            h.update(_hash_file(src_path, label).encode())
 
         for data_file in sorted(target.data):
             data_path = root / target.package / data_file
             h.update(data_file.encode())
-            h.update(_hash_file(data_path).encode())
+            h.update(_hash_file(data_path, label).encode())
 
         for dep in sorted(graph.edges[label]):
             h.update(dep.encode())

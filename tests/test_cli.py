@@ -187,6 +187,33 @@ class TestCommandTests(unittest.TestCase):
         self.assertIn("lirk: 0/1 tests passed", out2)
 
 
+class MissingOrUnreadableSourceCliTests(unittest.TestCase):
+    def test_missing_source_file_is_a_clean_failure_not_a_traceback(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "missing_src_repo", root)
+
+        code, out = _run(["build", "//..."], root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("missing.py", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_binary_source_file_is_a_clean_failure(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "binary_src_repo", root)
+
+        code, out = _run(["build", "//..."], root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", out)
+        self.assertIn("broken.py", out)
+        self.assertNotIn("Traceback", out)
+
+
 class DataFieldTests(unittest.TestCase):
     def setUp(self):
         tmpdir = tempfile.TemporaryDirectory()

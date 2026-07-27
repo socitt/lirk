@@ -10,9 +10,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from lirk.actions import run_test, validate_target
+from lirk.actions import missing_files, run_test, validate_target
 from lirk.cache import (
     CACHE_FILENAME,
+    CacheError,
     compute_fingerprints,
     load_cache,
     needs_build,
@@ -84,10 +85,34 @@ def _execute(
     """
     cache_path = root / CACHE_FILENAME
     cache = load_cache(cache_path)
-    fingerprints = compute_fingerprints(graph, root, order)
 
     ok = True
     summary = ExecutionSummary()
+
+    # Check every target's declared files exist before fingerprinting
+    # anything: compute_fingerprints reads file contents unconditionally,
+    # so a missing file reached from there would otherwise surface as an
+    # unguarded traceback instead of the clean per-target failure below.
+    for label in order:
+        target = graph.targets[label]
+        missing = missing_files(target, root)
+        if not missing:
+            continue
+        ok = False
+        summary.failed += 1
+        if mode == "test" and target.type == "test":
+            summary.tests_failed += 1
+        print(f"  FAIL   {label}: missing source file(s): {', '.join(missing)}")
+    if not ok:
+        return ok, summary
+
+    try:
+        fingerprints = compute_fingerprints(graph, root, order)
+    except CacheError as e:
+        print(f"lirk: {e}", file=sys.stderr)
+        summary.failed += 1
+        return False, summary
+
     for label in order:
         target = graph.targets[label]
         fp = fingerprints[label]

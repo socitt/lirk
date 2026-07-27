@@ -27,14 +27,21 @@ class ActionResult:
     stderr: str = ""
 
 
+def missing_files(target: Target, root: Path) -> list[str]:
+    """Declared srcs/data files (relative to the target's package) that
+    don't exist. Checked up front by the CLI, before fingerprinting,
+    so a missing file is reported as a clean per-target failure rather
+    than an unguarded traceback out of the cache layer."""
+    pkg_dir = root / target.package
+    return [f for f in (*target.srcs, *target.data) if not (pkg_dir / f).is_file()]
+
+
 def validate_target(target: Target, root: Path) -> ActionResult:
     """'Build' a target: confirm its declared source files exist and
     parse as syntactically valid Python. No compilation step beyond
     that (v1 has no bytecode/artifact output)."""
     pkg_dir = root / target.package
-    missing = [
-        f for f in (*target.srcs, *target.data) if not (pkg_dir / f).is_file()
-    ]
+    missing = missing_files(target, root)
     if missing:
         return ActionResult(
             target.label, False, f"missing source file(s): {', '.join(missing)}"
@@ -47,6 +54,10 @@ def validate_target(target: Target, root: Path) -> ActionResult:
         except SyntaxError as e:
             return ActionResult(
                 target.label, False, f"{src}: syntax error: {e}"
+            )
+        except (UnicodeDecodeError, ValueError) as e:
+            return ActionResult(
+                target.label, False, f"{src}: not readable as Python source: {e}"
             )
 
     return ActionResult(target.label, True, "ok")

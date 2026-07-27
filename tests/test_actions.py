@@ -44,6 +44,16 @@ class ValidateTargetTests(unittest.TestCase):
 
         self.assertTrue(result.ok)
 
+    def test_fails_cleanly_on_a_binary_source_file(self):
+        graph = build_graph(FIXTURES / "binary_src_repo")
+        target = graph.targets["//a:a"]
+
+        result = validate_target(target, FIXTURES / "binary_src_repo")
+
+        self.assertFalse(result.ok)
+        self.assertIn("broken.py", result.message)
+        self.assertIn("not readable as Python source", result.message)
+
     def test_fails_when_data_file_missing(self):
         graph = build_graph(FIXTURES / "data_dep_repo")
         target = graph.targets["//a:lib"]
