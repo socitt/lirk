@@ -10,6 +10,35 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-27 (update 6)
+
+- **Closed out the follow-up assessment.** Per the user: archive as a
+  dated record rather than fold into `KNOWN_ISSUES.md` (that file is
+  for unresolved problems; this assessment closed clean with no
+  outstanding bugs). Moved the untracked
+  `docs/LIRK_ASSESSMENT.md` to `docs/assessments/2026-07-27-post-go-assessment.md`
+  (dated to match its own header and today, not the suggested
+  "2026-07-26" which would have collided with the existing
+  `2026-07-26-assessment.md` — flagged and confirmed with the user
+  before naming it), adding a `## Resolution (2026-07-27)` section
+  mirroring the convention already established by the prior archive:
+  what happened to each of the 5 suggestions and the bugs section,
+  with commit hashes. `docs/assessments/` already existed as a
+  directory (holding the one prior archive) so this continues that
+  convention rather than inventing a new one.
+  Verified the merge is lossless: the appended body is byte-identical
+  to the original file's content past the header/note section (`diff`
+  confirmed, only difference was a blank-line join artifact, no
+  content lost).
+  This closes out the entire assessment hand-off: no bugs
+  outstanding, both real feature requests shipped
+  (multi-file-targets verification + summary line), the `--force`
+  doc-sync item explicitly left to `terminal-projects`' own docs (not
+  `lirk`'s problem), `lirk run` confirmed off any roadmap, and the
+  remaining "not urgent yet" bundle (parallelism/remote
+  caching/sandboxing/`lirk query`) reaffirmed deferred. Nothing left
+  open from this assessment.
+
 ## 2026-07-27 (update 5)
 
 - Item 3 (drop `lirk run` from the roadmap) checked — **nothing to
