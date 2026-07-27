@@ -24,6 +24,7 @@ class Target:
     type: str
     srcs: tuple[str, ...]
     deps: tuple[str, ...]
+    data: tuple[str, ...]
     package: str  # e.g. "path/to/pkg"; "" for a package at repo root
 
     @property
@@ -78,12 +79,14 @@ def _parse_target(raw: dict, path: Path, package: str, index: int) -> Target:
 
     srcs = _string_list(raw.get("srcs", []), "srcs", where)
     deps = _string_list(raw.get("deps", []), "deps", where)
+    data = _string_list(raw.get("data", []), "data", where)
 
     return Target(
         name=name,
         type=type_,
         srcs=tuple(srcs),
         deps=tuple(deps),
+        data=tuple(data),
         package=package,
     )
 

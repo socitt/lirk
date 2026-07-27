@@ -20,7 +20,7 @@ CACHE_FILENAME = ".lirk-cache.json"
 # Bump this whenever the behaviour of `validate_target` or `run_test`
 # changes, so existing caches are invalidated instead of trusting a
 # green result computed under different rules.
-ACTION_VERSION = 1
+ACTION_VERSION = 2
 
 
 def _hash_file(path: Path) -> str:
@@ -49,6 +49,11 @@ def compute_fingerprints(
             src_path = root / target.package / src
             h.update(src.encode())
             h.update(_hash_file(src_path).encode())
+
+        for data_file in sorted(target.data):
+            data_path = root / target.package / data_file
+            h.update(data_file.encode())
+            h.update(_hash_file(data_path).encode())
 
         for dep in sorted(graph.edges[label]):
             h.update(dep.encode())

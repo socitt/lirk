@@ -47,6 +47,26 @@ class ParseBuildFileTests(unittest.TestCase):
         self.assertEqual(test.type, "test")
         self.assertEqual(test.deps, (":mylib",))
 
+    def test_data_field_is_parsed_and_defaults_to_empty(self):
+        path = self._write(
+            """
+            [[target]]
+            name = "mylib"
+            type = "library"
+            srcs = ["mylib.py"]
+            data = ["story.txt"]
+
+            [[target]]
+            name = "bare"
+            type = "library"
+            """
+        )
+
+        with_data, without_data = parse_build_file(path, package="pkg")
+
+        self.assertEqual(with_data.data, ("story.txt",))
+        self.assertEqual(without_data.data, ())
+
     def test_srcs_and_deps_default_to_empty(self):
         path = self._write(
             """

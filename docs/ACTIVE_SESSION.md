@@ -34,6 +34,26 @@ to be attempted, and once done, what actually happened.
   shells (~41-46s each). Every later task that changes what
   build/test success means must bump this constant in the same
   commit — tasks 2, 10, 11, 14 per `TASKS.md`.
+- **Task 2 done.** Added a `data: tuple[str, ...]` field to `Target`
+  (`lirk/targets.py`), parsed via the existing `_string_list` helper,
+  defaulting to `()`. `compute_fingerprints` (`lirk/cache.py`) hashes
+  `data` files the same way as `srcs` (sorted, name + content hash),
+  in its own loop right after the `srcs` loop; bumped
+  `ACTION_VERSION` to 2 in the same commit. `validate_target`
+  (`lirk/actions.py`) now checks both `srcs` and `data` files exist
+  but only `ast.parse`s `srcs` — a data file failing existence reports
+  the same `missing source file(s): ...` message as a missing src.
+  Documented the field in `docs/design/target-format.md`. New fixture
+  `tests/fixtures/data_dep_repo/` (a library reading `story.txt` via
+  `data`, a test target asserting on its contents) plus unit tests in
+  `test_targets.py`/`test_actions.py` and the load-bearing CLI test
+  `test_editing_a_declared_data_file_invalidates_the_cache` in
+  `test_cli.py`. Verified that test is load-bearing: temporarily
+  removed the new data-hashing loop from `cache.py`, confirmed the
+  test fails (`0 != 1`), restored the loop (this accidentally also
+  reverted the `ACTION_VERSION` bump via `git checkout --`, caught and
+  reapplied both edits before re-running the suite). Full suite:
+  61/61, run 3x clean in fresh shells (~45-49s each).
 
 ## 2026-07-27 (update 6)
 

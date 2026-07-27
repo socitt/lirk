@@ -32,7 +32,9 @@ def validate_target(target: Target, root: Path) -> ActionResult:
     parse as syntactically valid Python. No compilation step beyond
     that (v1 has no bytecode/artifact output)."""
     pkg_dir = root / target.package
-    missing = [src for src in target.srcs if not (pkg_dir / src).is_file()]
+    missing = [
+        f for f in (*target.srcs, *target.data) if not (pkg_dir / f).is_file()
+    ]
     if missing:
         return ActionResult(
             target.label, False, f"missing source file(s): {', '.join(missing)}"

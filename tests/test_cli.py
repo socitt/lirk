@@ -187,6 +187,29 @@ class TestCommandTests(unittest.TestCase):
         self.assertIn("lirk: 0/1 tests passed", out2)
 
 
+class DataFieldTests(unittest.TestCase):
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "data_dep_repo", self.root)
+
+    def test_editing_a_declared_data_file_invalidates_the_cache(self):
+        code1, out1 = _run(["test", "//a:lib_test"], self.root)
+        self.assertEqual(code1, 0)
+        self.assertIn("PASS", out1)
+
+        (self.root / "a" / "story.txt").write_text(
+            "This is not the maze you are looking for.\n"
+        )
+
+        code2, out2 = _run(["test", "//a:lib_test"], self.root)
+
+        self.assertEqual(code2, 1)
+        self.assertIn("FAIL", out2)
+        self.assertNotIn("cached", out2)
+
+
 class DiscoverRootTests(unittest.TestCase):
     def setUp(self):
         tmpdir = tempfile.TemporaryDirectory()

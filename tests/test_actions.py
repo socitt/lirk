@@ -3,6 +3,7 @@ from pathlib import Path
 
 from lirk.actions import run_test, validate_target
 from lirk.graph import build_graph
+from lirk.targets import Target
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -34,6 +35,31 @@ class ValidateTargetTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("broken.py", result.message)
         self.assertIn("syntax error", result.message)
+
+    def test_ok_when_data_file_exists_and_is_not_syntax_checked(self):
+        graph = build_graph(FIXTURES / "data_dep_repo")
+        target = graph.targets["//a:lib"]
+
+        result = validate_target(target, FIXTURES / "data_dep_repo")
+
+        self.assertTrue(result.ok)
+
+    def test_fails_when_data_file_missing(self):
+        graph = build_graph(FIXTURES / "data_dep_repo")
+        target = graph.targets["//a:lib"]
+        broken = Target(
+            name=target.name,
+            type=target.type,
+            srcs=target.srcs,
+            deps=target.deps,
+            data=("nope.txt",),
+            package=target.package,
+        )
+
+        result = validate_target(broken, FIXTURES / "data_dep_repo")
+
+        self.assertFalse(result.ok)
+        self.assertIn("nope.txt", result.message)
 
 
 class RunTestTests(unittest.TestCase):

@@ -44,6 +44,12 @@ deps = [":mylib"]
   `[]`. Label resolution (`//path:name` vs `:name`) happens when the
   dependency graph is built across all packages, not at this parsing
   stage.
+- `data` — list of file paths relative to the package directory, for
+  files the target depends on that are not Python source (e.g. a
+  `.txt` fixture read at runtime). Defaults to `[]`. Fingerprinted the
+  same way as `srcs` so changes invalidate the cache, but files listed
+  here are not syntax-checked — putting a non-Python file in `srcs`
+  instead produces a bogus syntax error.
 
 Filename is `BUILD.lirk` rather than `BUILD.toml` to keep it visually
 distinctive when grepping/`ls`-ing a package directory, mirroring the
