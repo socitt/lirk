@@ -36,6 +36,18 @@ class ValidateTargetTests(unittest.TestCase):
         self.assertIn("broken.py", result.message)
         self.assertIn("syntax error", result.message)
 
+    def test_every_src_of_a_multi_src_library_is_syntax_checked(self):
+        # A mutant limiting validate_target to target.srcs[:1] would
+        # never reach three.py (the third src, which has a syntax
+        # error) and report this target as ok.
+        graph = build_graph(FIXTURES / "multisrc_repo")
+        target = graph.targets["//a:lib3"]
+
+        result = validate_target(target, FIXTURES / "multisrc_repo")
+
+        self.assertFalse(result.ok)
+        self.assertIn("three.py", result.message)
+
     def test_ok_when_data_file_exists_and_is_not_syntax_checked(self):
         graph = build_graph(FIXTURES / "data_dep_repo")
         target = graph.targets["//a:lib"]
@@ -105,6 +117,18 @@ class RunTestTests(unittest.TestCase):
 
         self.assertTrue(result.ok, result.stderr)
         self.assertEqual(result.message, "passed")
+
+    def test_second_src_of_a_multi_src_test_target_is_run_and_reported(self):
+        # A mutant limiting run_test to target.srcs[:1] would never
+        # invoke test_second.py (which fails) and report this target
+        # as passing, since target.srcs[0] (test_first.py) passes.
+        graph = build_graph(FIXTURES / "multisrc_repo")
+        target = graph.targets["//a:multi_test"]
+
+        result = run_test(target, FIXTURES / "multisrc_repo")
+
+        self.assertFalse(result.ok)
+        self.assertIn("test_second", result.message)
 
     def test_fails_when_source_file_missing_without_spawning_subprocess(self):
         graph = build_graph(FIXTURES / "missing_src_repo")

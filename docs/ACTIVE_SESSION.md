@@ -131,6 +131,21 @@ to be attempted, and once done, what actually happened.
   `428c517` fixed -- then restored the line and confirmed `git diff
   lirk/actions.py` was empty before re-running the suite. Full suite:
   67/67, run 3x clean in fresh shells (~46-54s each).
+- **Task 6 done.** No source change -- pure regression-test gap
+  closure (review T2). New fixture `tests/fixtures/multisrc_repo/`:
+  a `library` with 3 srcs where the third (`three.py`) has a syntax
+  error, and a `test` target with 2 srcs where the second
+  (`test_second.py`) fails. Two new tests in `test_actions.py`:
+  `test_every_src_of_a_multi_src_library_is_syntax_checked` and
+  `test_second_src_of_a_multi_src_test_target_is_run_and_reported`.
+  Verified both are load-bearing per the task's acceptance criterion
+  (`target.srcs[:1]` on either loop in `lirk/actions.py` must break at
+  least one test): applied `[:1]` to the `validate_target` syntax-check
+  loop via `Edit`, confirmed the library test fails (`True is not
+  false`), restored; then applied `[:1]` to the `run_test` subprocess
+  loop, confirmed the test-target test fails the same way, restored;
+  confirmed `git diff lirk/actions.py` was empty afterward. Full
+  suite: 69/69, run 3x clean in fresh shells (~48-52s each).
 
 ## 2026-07-27 (update 6)
 
