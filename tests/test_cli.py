@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import os
 import shutil
 import tempfile
@@ -185,6 +186,34 @@ class TestCommandTests(unittest.TestCase):
         # inflate the test-summary denominator on either run.
         self.assertIn("lirk: 0/1 tests passed", out1)
         self.assertIn("lirk: 0/1 tests passed", out2)
+
+
+class FailedDependencySkipTests(unittest.TestCase):
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "failed_dep_repo", self.root)
+
+    def test_dependent_of_a_failed_target_is_skipped_not_cached(self):
+        code, out = _run(["test", "//..."], self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", out)
+        self.assertIn("SKIP", out)
+        self.assertIn("//a:indep_test", out)
+        self.assertIn("dependency //a:broken_lib failed", out)
+
+        cache = json.loads((self.root / ".lirk-cache.json").read_text())
+        self.assertNotIn("test://a:indep_test", cache)
+
+    def test_second_run_still_skips_rather_than_reporting_cached(self):
+        _run(["test", "//..."], self.root)
+        code, out = _run(["test", "//..."], self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("SKIP", out)
+        self.assertNotIn("cached  //a:indep_test", out)
 
 
 class MissingOrUnreadableSourceCliTests(unittest.TestCase):

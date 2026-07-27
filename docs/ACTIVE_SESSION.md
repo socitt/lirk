@@ -93,6 +93,30 @@ to be attempted, and once done, what actually happened.
   was lost, but it's a sharp edge worth not hitting a third time).
   Restored both, then full suite: 64/64, run 3x clean in fresh shells
   (~44-46s each).
+- **Task 4 done.** `lirk/cli.py`: `_execute`'s main loop now tracks a
+  `failed: set[str]`; before acting on a label it checks whether any
+  direct dep is already in `failed` (topological order + adding
+  skipped labels to `failed` too means one level of checking
+  transitively covers the whole subtree) and if so prints `  SKIP
+  {label}: dependency {dep} failed`, marks the run failed, and
+  `continue`s without touching the cache. A real failure (not just a
+  skip) also adds its own label to `failed` now, which is what lets
+  the propagation chain start. Added `skipped`/`tests_skipped` to
+  `ExecutionSummary`; `tests_total` now includes `tests_skipped` so
+  skipped test targets count toward the denominator but never
+  `passed`. `cmd_build`'s summary line gained a `, S skipped` suffix
+  (existing tests use `assertIn` on a prefix, so unaffected).
+  New fixture `tests/fixtures/failed_dep_repo/` mirrors the review's
+  Probe F exactly: `//a:broken_lib` has a syntax error, `//a:indep_test`
+  depends on it but doesn't import it. New tests in `test_cli.py`
+  (`FailedDependencySkipTests`): first run shows FAIL+SKIP and no
+  `test://a:indep_test` entry in `.lirk-cache.json`; second run still
+  shows SKIP, never `cached`. Verified load-bearing: reverted the
+  `failed`-set logic (via `Edit`, not `git checkout` this time),
+  confirmed both tests fail and reproduce the review's exact
+  contradictory-looking output (`PASS`/`cached` above `lirk: FAILED`),
+  restored. Full suite: 66/66, run 3x clean in fresh shells (~44-46s
+  each).
 
 ## 2026-07-27 (update 6)
 

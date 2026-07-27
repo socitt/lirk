@@ -1,0 +1,10 @@
+[[target]]
+name = "broken_lib"
+type = "library"
+srcs = ["broken.py"]
+
+[[target]]
+name = "indep_test"
+type = "test"
+srcs = ["test_indep.py"]
+deps = [":broken_lib"]

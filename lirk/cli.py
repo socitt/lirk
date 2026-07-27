@@ -56,13 +56,20 @@ class ExecutionSummary:
     built: int = 0
     cached: int = 0
     failed: int = 0
+    skipped: int = 0
     tests_passed: int = 0
     tests_failed: int = 0
     tests_cached: int = 0
+    tests_skipped: int = 0
 
     @property
     def tests_total(self) -> int:
-        return self.tests_passed + self.tests_failed + self.tests_cached
+        return (
+            self.tests_passed
+            + self.tests_failed
+            + self.tests_cached
+            + self.tests_skipped
+        )
 
 
 def _execute(
@@ -113,11 +120,22 @@ def _execute(
         summary.failed += 1
         return False, summary
 
+    failed: set[str] = set()
     for label in order:
         target = graph.targets[label]
         fp = fingerprints[label]
         cache_key = f"{mode}:{label}"
         is_test = mode == "test" and target.type == "test"
+
+        dep_failure = next((d for d in graph.edges[label] if d in failed), None)
+        if dep_failure is not None:
+            ok = False
+            failed.add(label)
+            summary.skipped += 1
+            if is_test:
+                summary.tests_skipped += 1
+            print(f"  SKIP   {label}: dependency {dep_failure} failed")
+            continue
 
         if not force and not needs_build(cache_key, fp, cache):
             print(f"  cached  {label}")
@@ -142,6 +160,7 @@ def _execute(
                 summary.built += 1
         else:
             ok = False
+            failed.add(label)
             summary.failed += 1
             if is_test:
                 summary.tests_failed += 1
@@ -174,7 +193,7 @@ def cmd_build(root: Path, label: str, force: bool = False) -> int:
     ok, summary = _execute(root, graph, subset_order, mode="build", force=force)
     print(
         f"lirk: {summary.built} built, {summary.cached} cached, "
-        f"{summary.failed} failed"
+        f"{summary.failed} failed, {summary.skipped} skipped"
     )
     print("lirk: OK" if ok else "lirk: FAILED")
     return 0 if ok else 1
