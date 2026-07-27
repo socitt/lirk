@@ -1,3 +1,24 @@
+# TASKS (completed 2026-07-27)
+
+**All 18 tasks below are done.** Worked one at a time in commit order
+1-18, each in its own commit with the full suite run after (56 passing
+at the start, 91 by the end), and — for every new regression test —
+verified load-bearing by temporarily reverting the corresponding fix
+and confirming the test actually caught it. No forbidden process
+pattern (process group/session, pty, `shell=True`, results-file,
+parallel execution) was needed anywhere; task 11's timeout used
+`subprocess.run`'s own `timeout=` kwarg, with the known
+grandchild-process cleanup limitation documented as a comment rather
+than worked around. Nothing in "Explicitly not tasks" below was
+touched. See `docs/assessments/2026-07-26-tasks-completed-summary.md`
+for a short pointer, and `git log` (commits `d306ba4`..`88102cc`) for
+the individual task commits.
+
+Original file follows unchanged, as the historical record of what was
+actually asked for.
+
+---
+
 # TASKS
 
 Actionable items from the architecture review at
