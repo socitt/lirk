@@ -55,13 +55,27 @@ def load_targets(root: Path) -> dict[str, Target]:
 def resolve_label(raw_dep: str, package: str) -> str:
     """Resolve a dep string to a fully-qualified ``//pkg:name`` label."""
     if raw_dep.startswith("//"):
-        return raw_dep
-    if raw_dep.startswith(":"):
-        return f"//{package}{raw_dep}"
-    raise GraphError(
-        f"invalid dependency {raw_dep!r}: must start with '//' (absolute "
-        f"label) or ':' (relative to its own package)"
-    )
+        label = raw_dep
+    elif raw_dep.startswith(":"):
+        label = f"//{package}{raw_dep}"
+    else:
+        raise GraphError(
+            f"invalid dependency {raw_dep!r}: must start with '//' (absolute "
+            f"label) or ':' (relative to its own package)"
+        )
+
+    # A well-formed label is //pkg:name, where pkg may be empty (the
+    # root package, e.g. //:name) but name may not.
+    rest = label[2:]
+    if rest.count(":") != 1:
+        raise GraphError(
+            f"malformed label {raw_dep!r}: expected exactly one ':' "
+            "separating package from name"
+        )
+    if not rest.rpartition(":")[2]:
+        raise GraphError(f"malformed label {raw_dep!r}: name part must not be empty")
+
+    return label
 
 
 @dataclass

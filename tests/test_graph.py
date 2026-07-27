@@ -3,7 +3,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lirk.graph import GraphError, build_graph, topological_sort, transitive_closure
+from lirk.graph import (
+    GraphError,
+    build_graph,
+    resolve_label,
+    topological_sort,
+    transitive_closure,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -35,6 +41,29 @@ class BuildGraphTests(unittest.TestCase):
     def test_self_dependency_raises_graph_error(self):
         with self.assertRaisesRegex(GraphError, "cannot depend on itself"):
             build_graph(FIXTURES / "self_dep_repo")
+
+
+class ResolveLabelTests(unittest.TestCase):
+    def test_absolute_label_without_a_colon_is_malformed_not_missing(self):
+        # Previously this fell through to "does not exist" downstream,
+        # which sends a reader hunting for a missing target instead of
+        # a typo -- it should be reported as malformed at the source.
+        with self.assertRaisesRegex(GraphError, "malformed"):
+            resolve_label("//a", "pkg")
+
+    def test_label_with_two_colons_is_malformed(self):
+        with self.assertRaisesRegex(GraphError, "malformed"):
+            resolve_label("//a:b:c", "pkg")
+
+    def test_empty_name_part_is_malformed(self):
+        with self.assertRaisesRegex(GraphError, "malformed"):
+            resolve_label(":", "pkg")
+
+    def test_root_package_label_still_resolves(self):
+        self.assertEqual(resolve_label("//:name", "pkg"), "//:name")
+
+    def test_relative_label_still_resolves(self):
+        self.assertEqual(resolve_label(":sibling", "pkg"), "//pkg:sibling")
 
 
 class FindBuildFilesTests(unittest.TestCase):

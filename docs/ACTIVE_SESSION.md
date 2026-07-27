@@ -334,6 +334,22 @@ to be attempted, and once done, what actually happened.
   different hashes), restored, confirmed `git diff lirk/cache.py` was
   empty. Full suite: 83/83, run 3x clean in fresh shells (~77-82s
   each).
+- **Task 16 done.** `lirk/graph.py`: `resolve_label` now validates
+  the fully-qualified label shape after the `//`/`:` branch --
+  requires exactly one `:` separating package from name, and the name
+  part must be non-empty (the package part may be, for the root
+  package form `//:name`). Review D7/Probe N: a malformed dep like
+  `//a` (no colon) previously fell through to a downstream `dependency
+  '//a' does not exist` error, sending a reader hunting for a missing
+  target instead of a typo. New tests in `test_graph.py`
+  (`ResolveLabelTests`): no-colon, two-colon, and empty-name forms all
+  raise `GraphError` mentioning "malformed"; `//:name` and a normal
+  relative `:sibling` still resolve correctly. Checked no existing
+  fixture `BUILD.lirk` declares a malformed label (none do). Verified
+  load-bearing: reverted to the old two-branch version via `Edit`,
+  confirmed all three new malformed-label tests fail (`GraphError not
+  raised`), restored, confirmed the diff matched intent. Full suite:
+  88/88, run 2x clean in fresh shells (~61-62s each).
 
 ## 2026-07-27 (update 6)
 
