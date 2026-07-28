@@ -42,6 +42,11 @@ sandboxing and parallelism (both easy to add later) in exchange for
 a process model simple enough to reason about directly on the
 device where the original bug appeared.
 
+Separately, real Bazel was ruled out too: on this device the JVM
+itself cannot start at all (confirmed independent of Bazel — see
+[`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md)), so Bazel is
+structurally impossible here, not just impractical.
+
 ## How it works
 
 A repo declares targets in `BUILD.lirk` files (TOML), one per
