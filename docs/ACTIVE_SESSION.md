@@ -10,6 +10,79 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-28 (update 2)
+
+- **Status**: Resuming after an unplanned session restart. The prior
+  session had started packaging work (an untracked `pyproject.toml`,
+  `setuptools` backend, `lirk = "lirk.cli:main"` console script) but
+  crashed before it was tested, logged, or committed — recovered by
+  reading this file plus `git log`/`git status`/file timestamps and
+  confirmed with the user.
+- **User feedback driving this update**, verbatim priorities: (1) lirk
+  has no documented install path — package it (simplest option given
+  the codebase) and add an Installation section to the README with
+  exact steps; (2) define explicit, non-subjective v1 "stable"
+  criteria (the README only said serial execution needs to be "proven
+  stable" and lirk "isn't yet self-hosting" without saying what would
+  satisfy either); (3) hold off on new languages/features until those
+  criteria are met, per the project's own stated scope.
+- **Packaging (item 1) done.** The untracked `pyproject.toml` was
+  already correct (verified, not rewritten): `setuptools>=68` backend,
+  `lirk.cli:main` entry point, `packages = ["lirk"]`. Verified two
+  install paths in scratch venvs: `pip install <path>` (regular) and
+  `pip install -e <path>` (editable) both produce a working `lirk`
+  console script (`lirk --help`, and a real `lirk build //... --root
+  tests/fixtures/sample_repo` run, both correct). The regular install
+  left `build/`/`lirk.egg-info/` artifacts in the repo source tree
+  (setuptools legacy build behavior when installing from a local path
+  rather than an sdist); removed them and added both to `.gitignore` so
+  a future `pip install .` from this repo doesn't dirty `git status`.
+  Confirmed the GitHub remote (`socitt/lirk`) is reachable
+  (`git ls-remote`), so a `pip install git+https://...` README
+  instruction is accurate once this session's commits are pushed.
+  Added an "Installation" section to `README.md` (between "How it
+  works" and "Scope") documenting both the `git+https` one-liner and
+  the clone-then-`pip install .`/`-e .` path.
+- **v1 stability criteria (item 2) done.** Replaced the vague "proven
+  stable" (in "Why this exists", re: parallelism) and "not yet
+  self-hosting" (in "Status") language with three explicit,
+  checkable criteria in a new "v1 stability criteria" block under
+  Status: (1) self-hosting — lirk builds/tests itself via its own
+  `BUILD.lirk`, not just `pytest`/`unittest` (not met — no
+  `BUILD.lirk` exists for this repo yet); (2) at least 200 cumulative
+  `lirk build`/`lirk test` invocations across at least 3 distinct real
+  (non-fixture, non-lirk) repos with zero `signal: hangup` and zero
+  cache-correctness bugs (marked **unverified** rather than met —
+  `terminal-projects` dogfooding has almost certainly run past this
+  scale already, but it's never been tallied against a stated number,
+  and asserting it without counting would be exactly the kind of
+  subjective call the user asked to eliminate); (3)
+  `docs/KNOWN_ISSUES.md` clear of anything beyond cosmetic entries
+  (met today — one entry, status Fixed). All three must hold before
+  parallelism work starts or scope expands.
+- **Scope freeze (item 3) done.** `README.md`'s Scope section now
+  states explicitly that no new languages/target types are added
+  until the v1 criteria are met ("a hold, not just a 'later'"), and
+  the "Why this exists" parallelism bullet now points at the criteria
+  instead of the old unquantified phrase.
+- **Verification**: found and removed a stray
+  `tests/fixtures/sample_repo/.lirk-cache.json` left by this session's
+  own manual install-verification run (gitignored, never staged) — same
+  spurious-failure gotcha the 2026-07-27 update-4 entry already hit and
+  documented; one `test_cli.py` test failed until it was deleted. Full
+  suite 91/91 clean after removal. Did not add self-hosting
+  (`lirk`'s own `BUILD.lirk`) in this session — that's criterion 1
+  above, left as explicitly open/future work, not attempted here since
+  the user's ask was to define the criteria, not necessarily clear
+  them in the same session.
+- **Next**: if picking up self-hosting (criterion 1) becomes the next
+  task, it needs its own `BUILD.lirk` describing `lirk/`'s modules as
+  library targets and `tests/` as test targets, plus a decision on
+  whether `lirk test //...` fully replaces the `pytest`/`unittest`
+  invocation used today or runs alongside it. Otherwise: tally
+  criterion 2 against real invocation counts next time a dogfooding
+  session's totals are available.
+
 ## 2026-07-28
 
 - **Picked up the two uncommitted dogfooding files** left by the

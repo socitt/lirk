@@ -33,7 +33,8 @@ contributing to the original failure. Concretely, lirk:
   read the file back" sequence. Output and exit code are captured
   directly from the same `subprocess.run()` call that ran the test.
 - Runs builds serially in v1. No per-action process groups, no
-  parallelism, until serial execution is proven stable.
+  parallelism, until serial execution is proven stable — see the v1
+  stability criteria under Status below for exactly what that means.
 
 This is a narrower, more conservative subprocess model than a
 general-purpose build tool needs — that's the point. It trades away
@@ -141,8 +142,36 @@ discovery entirely.
 
 ## Status
 
-Early development. Not yet self-hosting — lirk is tested with plain
-`pytest`/`unittest`, not with itself.
+Early development, not yet stable.
+
+**v1 stability criteria.** Serial execution counts as "proven stable"
+(unblocking parallelism work), and lirk is ready to expand scope
+beyond `library`/`test` Python targets, once *all three* of the
+following hold. This replaces the earlier "proven stable"/"not yet
+self-hosting" language with a concrete, non-subjective bar:
+
+1. **Self-hosting.** lirk builds and tests its own source through its
+   own `BUILD.lirk` files (`lirk build //...` / `lirk test //...` run
+   against this repo), not only via a separately maintained
+   `pytest`/`unittest` suite. **Not met** — there is no `BUILD.lirk`
+   for this repo yet.
+2. **Track record on real repos.** At least 200 cumulative `lirk
+   build`/`lirk test` invocations across at least 3 distinct real
+   (non-fixture, non-lirk) repos, with zero `signal: hangup`
+   occurrences and zero cache-correctness bugs (a `cached` result that
+   disagrees with what a `--force` fresh run produces). Dogfooding
+   against `terminal-projects` (backgammon, go, tictactoe, connect4,
+   chess, adventure-engine) has almost certainly run past this scale
+   without either failure mode, but the runs haven't been tallied
+   against this specific threshold — **unverified**, treat as not met
+   until it has been.
+3. **`docs/KNOWN_ISSUES.md` clear.** No open entries beyond ones
+   explicitly marked cosmetic-only. **Met** as of this writing (one
+   entry on record, status: Fixed).
+
+Until all three are explicitly confirmed met, no parallelism work
+starts and no new languages or target types are added — see Scope
+above.
 
 ## License
 
