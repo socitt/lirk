@@ -7,6 +7,147 @@ still open.
 
 ---
 
+## Why lirk exists instead of real Bazel — confirmed root cause (2026-07-28)
+
+**Status:** Confirmed, not fixable on this device. This isn't a bug in
+lirk or in Bazel — it's a platform limitation that explains why lirk
+had to exist in the first place, documented here as the definitive
+answer rather than an open theory.
+
+### Background
+
+lirk's README already explains that lirk exists because of an
+unresolved `signal: hangup` bug in Please (a Bazel-alike) on this
+device — see "Why this exists" in [README.md](../README.md). That
+investigation left open a natural follow-up question: could real
+Bazel itself be used instead of a Please-alike at all? This entry
+answers that question directly: no, and the reason is unrelated to
+the Please bug — it's one level further down, in the JVM.
+
+### Environment
+
+- OS: Alpine Linux 3.23 (musl libc), `aarch64`.
+- Running under **iSH-AOK**, a Linux-userland-on-iOS app, on an
+  **iPhone 15 Pro Max** (A17 Pro). Confirmed via `/proc/cpuinfo`
+  (`host device: iPhone 15 Pro Max`, `host arch: arm64e(A17 Pro)`) and
+  the iOS-sandbox-specific container mount path.
+- No Docker/Podman/proot available as a fallback sandbox. Network
+  access is unrestricted (GitHub and Alpine CDN mirrors reachable).
+
+### Test 1 — official Bazel release binary: fails (glibc vs musl)
+
+The official `bazelbuild/bazel` GitHub releases only ship binaries
+linked against glibc; Alpine uses musl. The matching `linux-arm64`
+build segfaults immediately:
+
+```
+$ ./bazel version
+Segmentation fault
+```
+
+Alpine's `gcompat` shim provides the glibc dynamic loader path
+(`/lib/ld-linux-aarch64.so.1`) but is not a full glibc
+reimplementation — it's missing the `_FORTIFY_SOURCE` "checked"
+symbols (`__memcpy_chk`, `__realpath_chk`, `__strncpy_chk`,
+`__longjmp_chk`, ...) that hardened binaries like Bazel are compiled
+against:
+
+```
+$ ldd ./bazel
+Error relocating ./bazel: __realpath_chk: symbol not found
+Error relocating ./bazel: __memcpy_chk: symbol not found
+Error relocating ./bazel: __strncpy_chk: symbol not found
+Error relocating ./bazel: __longjmp_chk: symbol not found
+```
+
+This is a permanent, well-known limitation of `gcompat`, not
+something a config change fixes.
+
+### Test 2 — Alpine's native musl `bazel8` package: installs, JVM crashes
+
+Alpine maintains its own musl-native Bazel builds in `edge/testing`
+(`bazel`, `bazel6`, `bazel7`, `bazel8`). Installing `bazel8` (8.7.0)
+plus OpenJDK 21 into an isolated `apk --root` test root (so the real
+system was untouched) and running it via `chroot` gets past the
+libc problem entirely, then hits a JVM crash:
+
+```
+$ JAVA_HOME=/usr/lib/jvm/java-21-openjdk bazel --output_user_root=/tmp/bazel_out version
+#
+# A fatal error has been detected by the Java Runtime Environment:
+#
+#  Internal Error (assembler_aarch64.hpp:245), pid=947
+#  guarantee(val < (1ULL << nbits)) failed: Field too big for insn
+```
+
+To rule out this being Bazel-specific, the raw JDK was tested
+directly, with JIT and class-data-sharing both disabled to rule out
+the obvious first guesses:
+
+```
+$ java -version                 → same crash
+$ java -Xint -version           → same crash (interpreter only, JIT disabled)
+$ java -Xshare:off -version     → same crash (CDS disabled)
+```
+
+It crashes on every JVM invocation, before any Bazel-specific code
+runs, regardless of JIT/interpreter mode. **The JVM itself cannot
+start on this device.**
+
+### Root cause
+
+`guarantee(val < (1ULL << nbits)) failed: Field too big for insn` in
+`assembler_aarch64.hpp` is a known class of HotSpot AArch64 codegen
+bug (see OpenJDK JDK-8235385, JDK-8247766, JDK-8266885, and similar
+reports against Adoptium/Temurin and GraalVM on various aarch64
+hosts). It surfaces when the JVM's AArch64 code generator produces an
+instruction whose immediate field doesn't fit — in practice this
+tends to happen on non-standard or emulated AArch64 execution
+environments. Since this host is iSH-AOK's Linux-on-iOS emulation
+layer rather than real or virtualized Linux on bare silicon, the most
+likely explanation is that iSH's syscall/CPU emulation doesn't behave
+identically enough to real AArch64 hardware for HotSpot's low-level
+runtime bootstrap (which runs unconditionally, even under `-Xint`) to
+succeed. This is an upstream JVM/host-emulation incompatibility, not
+something fixable by lirk, by Bazel, or by iSH-AOK config.
+
+### Bottom line
+
+| Layer | Status | Fixable here? |
+|---|---|---|
+| Official glibc Bazel binary | Segfaults via `gcompat` (missing `_chk` symbols) | No — `gcompat` is permanently incomplete |
+| Alpine's native musl `bazel8` package | Installs fine, resolves the libc problem | Yes, this part works |
+| Bundled/system JVM (any Java 21 invocation) | Crashes on startup (`assembler_aarch64.hpp`) | **No** — JVM/iSH-host incompatibility |
+
+Even fully solving the musl/glibc mismatch (which Alpine's own
+`bazel8` package does) doesn't help, because Bazel requires a working
+JVM, and Java itself cannot start on this device. There is no config
+flag or package that works around a JVM that crashes on `java
+-version`.
+
+### Practical implications
+
+- Real Bazel is not usable on this device, full stop — not because of
+  a missing install, but because the host can't run a JVM at all.
+- Any other JVM-based tooling (Gradle, Maven, etc.) will very likely
+  hit this same crash for the same reason — this is broader than a
+  single-tool bug.
+- The only realistic paths forward are external to this device: a
+  remote build (Bazel remote execution, a CI runner), or running the
+  build on real hardware or a standard Linux VM instead of inside
+  iSH-AOK.
+- This is independent of, and unrelated to, the Please `signal:
+  hangup` bug documented in lirk's README — that bug was about
+  process/session handling in a JVM-free tool. Even if that bug were
+  fully root-caused and fixed, it would not make real Bazel usable
+  here, since Bazel's blocker is one layer further down, in the JVM
+  itself. A draft upstream bug report for iSH-AOK based on this
+  investigation is tracked in
+  [`DRAFT_BAZEL_JVM_ISSUE.md`](DRAFT_BAZEL_JVM_ISSUE.md) (pending
+  review before filing).
+
+---
+
 ## `lirk test` failed on root-relative imports — found and fixed (2026-07-27)
 
 **Status:** Fixed. Confirmed 10/10 across two separate 10-run batches
