@@ -4,3 +4,5 @@ __pycache__/
 docs/_site/
 .jekyll-cache/
 .jekyll-metadata
+build/
+*.egg-info/

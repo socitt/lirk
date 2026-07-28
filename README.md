@@ -78,13 +78,40 @@ next run even with an unchanged fingerprint. See "Why this exists"
 above for why the test step is one direct `subprocess.run()` call
 and nothing fancier.
 
+## Installation
+
+lirk isn't published to PyPI yet. Install straight from the git repo
+with pip (Python 3.11+, no other dependencies):
+
+```
+pip install git+https://github.com/socitt/lirk.git
+```
+
+Or clone and install from a local checkout — useful for working on
+lirk itself:
+
+```
+git clone https://github.com/socitt/lirk.git
+cd lirk
+pip install .          # or: pip install -e .   (editable, for development)
+```
+
+Either way installs a `lirk` console script on `PATH`:
+
+```
+lirk build //...
+lirk test //...
+```
+
 ## Scope (v1)
 
 lirk currently only supports Python targets: `library` and `test`.
-No binaries, no genrules, no other languages yet. The goal is to
-prove the core approach (dependency graph, incremental builds via
-content hashing, direct subprocess execution) works reliably before
-expanding scope.
+No binaries, no genrules, no other languages yet, and no new
+languages or target types will be added until the v1 stability
+criteria below are met — this is a hold, not just a "later." The
+goal is to prove the core approach (dependency graph, incremental
+builds via content hashing, direct subprocess execution) works
+reliably before expanding scope.
 
 ## Using lirk in a repo
 
