@@ -41,6 +41,43 @@ sandboxing and parallelism (both easy to add later) in exchange for
 a process model simple enough to reason about directly on the
 device where the original bug appeared.
 
+## How it works
+
+A repo declares targets in `BUILD.lirk` files (TOML), one per
+package directory. Each target is a `library` (a set of `.py` srcs
+other targets can depend on) or a `test` (srcs run via `python3 -m
+unittest`). Deps are expressed as `//package:name` labels (or
+`:name` for a same-package sibling), and can cross package
+directories freely:
+
+```mermaid
+graph LR
+    a_test["//a:a_test (test)"] --> a_lib["//a:a_lib (library)"]
+    a_lib --> b_lib["//b:b_lib (library)"]
+    b_lib --> c_lib["//c:c_lib (library)"]
+```
+
+`lirk build //...` or `lirk test //pkg:name` then runs this
+pipeline:
+
+```mermaid
+flowchart TD
+    A["lirk build/test //label"] --> B["find repo root\n(.lirk-root marker, else cwd)"]
+    B --> C["scan for BUILD.lirk files,\nparse targets"]
+    C --> D["build dependency graph,\ntopological sort"]
+    D --> E["narrow to the requested target's\ntransitive closure"]
+    E --> F["content-hash fingerprint\neach target (srcs + dep fingerprints)"]
+    F --> G{"fingerprint matches\n.lirk-cache.json?"}
+    G -- yes --> H["skip: report cached"]
+    G -- no --> I["build: validate srcs exist + parse as Python\ntest: subprocess.run() per src\n(one direct call, no pty/process group)"]
+    I --> J["write result to\n.lirk-cache.json (atomic)"]
+```
+
+Only successful results are cached, so a failure is retried on the
+next run even with an unchanged fingerprint. See "Why this exists"
+above for why the test step is one direct `subprocess.run()` call
+and nothing fancier.
+
 ## Scope (v1)
 
 lirk currently only supports Python targets: `library` and `test`.
