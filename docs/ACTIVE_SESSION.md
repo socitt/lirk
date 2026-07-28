@@ -10,6 +10,28 @@ to be attempted, and once done, what actually happened.
 
 ---
 
+## 2026-07-28
+
+- **Picked up the two uncommitted dogfooding files** left by the
+  terminal-projects side (`chess`, `adventure-engine` sessions,
+  2026-07-27). Both closed clean — no lirk bugs. Investigated the one
+  open item: the flat ~2.7-3.2s per-test-invocation overhead the
+  chess-session file flagged as "worth a lirk-side profiling pass."
+  Root cause found: it's `lirk.cli`'s own stdlib import cost
+  (`argparse`, `dataclasses`→`inspect`, `tomllib`, `subprocess`→
+  `typing`) paid once per process start, not the test subprocess or
+  the graph/cache layers — confirmed by timing a fully-cached `lirk
+  test` invocation (zero test subprocesses run) at 2.70s wall, almost
+  entirely accounted for by `python3 -c "import lirk.cli"` alone
+  (2.56s). Not a bug, no fix applied — see the Resolution section at
+  the top of `docs/assessments/2026-07-27-chess-dogfooding.md` for the
+  full writeup and reasoning. Archived both files to
+  `docs/assessments/` with Resolution sections, following the
+  `2026-07-26-assessment.md` / `2026-07-27-post-go-assessment.md`
+  precedent (`docs/dogfooding/` is now empty and removed).
+- Next: adding architecture diagrams to the README (target/dependency
+  graph, build/cache flow) — no lirk-side bugs pending.
+
 ## 2026-07-27 (update 8)
 
 - **Review-driven work fully closed out.** All 18 tasks from the
