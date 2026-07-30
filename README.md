@@ -178,6 +178,20 @@ Until all three are explicitly confirmed met, no parallelism work
 starts and no new languages or target types are added — see Scope
 above.
 
+## Contributing
+
+Two docs carry the current state of the project, and both are living
+references — overwritten as things change, not appended to:
+
+- [`docs/DESIGN.md`](docs/DESIGN.md) — the architecture as it is now:
+  the process-model constraints and why they exist, the target/label
+  model, the pipeline, the caching model, and the settled decisions
+  that shouldn't be re-opened.
+- [`docs/TASKS.md`](docs/TASKS.md) — the backlog: v1 criteria with
+  honest status, open bugs, and next actions in priority order.
+
+Read DESIGN.md before changing anything in `lirk/`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

@@ -1,7 +1,7 @@
 """Parsing of BUILD.lirk target-declaration files (TOML syntax).
 
-See docs/design/target-format.md for the schema and the format
-tradeoff behind choosing TOML.
+See docs/build-format.md for the schema, and docs/DESIGN.md for the
+target model and the format tradeoff behind choosing TOML.
 """
 
 from __future__ import annotations

@@ -7,10 +7,12 @@ markdown: kramdown
 url: "https://socitt.github.io"
 baseurl: "/lirk"
 
-# Internal working logs: real history, not user-facing reference docs.
+# Internal contributor docs and working logs: not user-facing reference.
 # Left in the repo (viewable via normal GitHub browsing) but not built
 # into the Pages site or its nav.
 exclude:
+  - DESIGN.md
+  - TASKS.md
   - ACTIVE_SESSION.md
   - KNOWN_ISSUES.md
   - assessments/
