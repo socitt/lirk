@@ -141,10 +141,9 @@ flag or package that works around a JVM that crashes on `java
   process/session handling in a JVM-free tool. Even if that bug were
   fully root-caused and fixed, it would not make real Bazel usable
   here, since Bazel's blocker is one layer further down, in the JVM
-  itself. A draft upstream bug report for iSH-AOK based on this
-  investigation is tracked in
-  [`DRAFT_BAZEL_JVM_ISSUE.md`](DRAFT_BAZEL_JVM_ISSUE.md) (pending
-  review before filing).
+  itself. An upstream bug report based on this investigation has been
+  **filed against [emkey1/ish-AOK](https://github.com/emkey1/ish-AOK)**;
+  the local draft was removed once submitted.
 
 ---
 
