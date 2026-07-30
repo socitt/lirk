@@ -59,7 +59,15 @@ def validate_target(target: Target, root: Path) -> ActionResult:
     for src in target.srcs:
         src_path = pkg_dir / src
         try:
-            ast.parse(src_path.read_text(), filename=str(src_path))
+            # Decoded as UTF-8 explicitly, not via the locale encoding:
+            # Python source is UTF-8 by default (PEP 3120), and a
+            # locale-dependent read makes this check platform-dependent
+            # -- a single-byte locale like cp1252 decodes arbitrary
+            # bytes, so a binary file reaches ast.parse and reports a
+            # confusing syntax error instead of "not readable".
+            ast.parse(
+                src_path.read_text(encoding="utf-8"), filename=str(src_path)
+            )
         except SyntaxError as e:
             return ActionResult(
                 target.label, False, f"{src}: syntax error: {e}"
