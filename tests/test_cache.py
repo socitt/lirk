@@ -74,6 +74,53 @@ class ComputeFingerprintsTests(unittest.TestCase):
             self.assertNotEqual(before[label], after[label], label)
 
 
+class DataDirectoryFingerprintTests(unittest.TestCase):
+    LABEL = "//pkg:lib_with_data_dir"
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "datadir_repo", self.root)
+        self.assets = self.root / "pkg" / "assets"
+
+    def _fingerprint(self):
+        graph = build_graph(self.root)
+        order = topological_sort(graph)
+        return compute_fingerprints(graph, self.root, order)[self.LABEL]
+
+    def test_deterministic_across_runs(self):
+        self.assertEqual(self._fingerprint(), self._fingerprint())
+
+    def test_editing_a_nested_data_file_changes_the_fingerprint(self):
+        before = self._fingerprint()
+        (self.assets / "sub" / "nested.txt").write_text("edited\n")
+        self.assertNotEqual(before, self._fingerprint())
+
+    def test_adding_a_data_file_changes_the_fingerprint(self):
+        # Contents alone would not catch this -- the relative path of
+        # each file is folded into the hash for exactly this case.
+        before = self._fingerprint()
+        (self.assets / "added.txt").write_text("added\n")
+        self.assertNotEqual(before, self._fingerprint())
+
+    def test_removing_a_data_file_changes_the_fingerprint(self):
+        before = self._fingerprint()
+        (self.assets / "top.txt").unlink()
+        self.assertNotEqual(before, self._fingerprint())
+
+    def test_generated_pycache_does_not_change_the_fingerprint(self):
+        # Running a test writes .pyc files into a fixture tree. If those
+        # counted, the fingerprint would change on every run and nothing
+        # would ever stay cached.
+        before = self._fingerprint()
+        pycache = self.assets / "sub" / "__pycache__"
+        pycache.mkdir()
+        (pycache / "nested.cpython-312.pyc").write_bytes(b"\x00generated")
+        (self.assets / ".hidden").write_text("hidden\n")
+        self.assertEqual(before, self._fingerprint())
+
+
 class DiamondFingerprintTests(unittest.TestCase):
     # d -> b, d -> c, both b and c -> a. compute_fingerprints sorts a
     # target's deps specifically so declaration order doesn't matter

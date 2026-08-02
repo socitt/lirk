@@ -36,6 +36,28 @@ def _hash_file(path: Path, label: str) -> str:
         raise CacheError(f"{label}: cannot read {path}: {e}") from e
 
 
+def _directory_entries(directory: Path) -> list[tuple[str, Path]]:
+    """Every file under a `data` directory, as (posix relative path, path),
+    sorted by that path so the fingerprint doesn't depend on filesystem
+    iteration order.
+
+    Skips dot-prefixed and __pycache__ segments. Both are generated
+    rather than declared: a fixture tree containing Python accumulates
+    .pyc files as a side effect of *running the very tests* whose
+    fingerprint this feeds, which would change the input on every run
+    and mean nothing was ever cached.
+    """
+    entries = []
+    for path in directory.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(directory)
+        if any(p.startswith(".") or p == "__pycache__" for p in rel.parts):
+            continue
+        entries.append((rel.as_posix(), path))
+    return sorted(entries)
+
+
 def compute_fingerprints(
     graph: Graph, root: Path, order: list[str]
 ) -> dict[str, str]:
@@ -62,7 +84,15 @@ def compute_fingerprints(
         for data_file in sorted(target.data):
             data_path = root / target.package / data_file
             h.update(data_file.encode())
-            h.update(_hash_file(data_path, label).encode())
+            if data_path.is_dir():
+                # The relative path of each file goes into the hash, not
+                # just its contents, so adding or removing a file in the
+                # tree changes the fingerprint even if nothing is edited.
+                for rel, file_path in _directory_entries(data_path):
+                    h.update(rel.encode())
+                    h.update(_hash_file(file_path, label).encode())
+            else:
+                h.update(_hash_file(data_path, label).encode())
 
         for dep in sorted(graph.edges[label]):
             h.update(dep.encode())

@@ -40,9 +40,19 @@ def missing_files(target: Target, root: Path) -> list[str]:
     """Declared srcs/data files (relative to the target's package) that
     don't exist. Checked up front by the CLI, before fingerprinting,
     so a missing file is reported as a clean per-target failure rather
-    than an unguarded traceback out of the cache layer."""
+    than an unguarded traceback out of the cache layer.
+
+    A `data` entry may name a directory, in which case it exists if the
+    directory does; `srcs` must still be files, since every src is
+    parsed as Python."""
     pkg_dir = root / target.package
-    return [f for f in (*target.srcs, *target.data) if not (pkg_dir / f).is_file()]
+    missing = [s for s in target.srcs if not (pkg_dir / s).is_file()]
+    missing += [
+        d
+        for d in target.data
+        if not (pkg_dir / d).is_file() and not (pkg_dir / d).is_dir()
+    ]
+    return missing
 
 
 def validate_target(target: Target, root: Path) -> ActionResult:

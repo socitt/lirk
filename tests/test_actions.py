@@ -194,6 +194,29 @@ class RunTestTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("missing.py", result.message)
 
+    def test_data_directory_counts_as_present(self):
+        # `data` may name a directory; only srcs must be files.
+        root = FIXTURES / "datadir_repo"
+        graph = build_graph(root)
+        target = graph.targets["//pkg:lib_with_data_dir"]
+
+        self.assertEqual(actions.missing_files(target, root), [])
+
+    def test_missing_data_directory_is_reported(self):
+        root = FIXTURES / "datadir_repo"
+        graph = build_graph(root)
+        target = graph.targets["//pkg:lib_with_data_dir"]
+        absent = Target(
+            name=target.name,
+            type=target.type,
+            srcs=target.srcs,
+            deps=target.deps,
+            data=("no_such_dir",),
+            package=target.package,
+        )
+
+        self.assertEqual(actions.missing_files(absent, root), ["no_such_dir"])
+
     def test_runs_a_test_src_in_a_package_subdirectory(self):
         # "sub/test_nested.py" must run as the module `sub.test_nested`;
         # deriving the stem alone made it an unexplained ModuleNotFoundError.

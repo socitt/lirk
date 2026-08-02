@@ -1,0 +1,5 @@
+[[target]]
+name = "lib_with_data_dir"
+type = "library"
+srcs = ["mod.py"]
+data = ["assets"]
