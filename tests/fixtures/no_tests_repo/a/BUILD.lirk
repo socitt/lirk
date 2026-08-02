@@ -1,0 +1,4 @@
+[[target]]
+name = "empty_test"
+type = "test"
+srcs = ["test_nothing.py"]

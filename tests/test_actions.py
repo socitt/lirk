@@ -165,6 +165,34 @@ class RunTestTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("timed out", result.message)
 
+    def test_timeout_does_not_abandon_the_remaining_srcs(self):
+        # srcs are [test_hang.py, test_after.py]; test_after fails on
+        # purpose. If the timeout returned early, only test_hang would
+        # appear -- seeing both proves the src after a timeout still ran.
+        graph = build_graph(FIXTURES / "hang_repo")
+        target = graph.targets["//a:hang_then_more_test"]
+
+        with patch.object(actions, "TEST_TIMEOUT_SECONDS", 0.5):
+            result = run_test(target, FIXTURES / "hang_repo")
+
+        self.assertFalse(result.ok)
+        self.assertIn("2 of 2", result.message)
+        self.assertIn("timed out", result.message)
+        self.assertIn("test_hang", result.message)
+        self.assertIn("test_after", result.message)
+
+    def test_module_containing_zero_tests_is_a_failure(self):
+        # Exits 5 on 3.12+ but 0 on 3.11, which pyproject still
+        # supports, so an exit-code-only check passes a file that tests
+        # nothing. Detected from the "Ran 0 tests" summary instead.
+        root = FIXTURES / "no_tests_repo"
+        graph = build_graph(root)
+
+        result = run_test(graph.targets["//a:empty_test"], root)
+
+        self.assertFalse(result.ok)
+        self.assertIn("no tests", result.message)
+
     def test_fails_defensively_on_a_test_target_with_no_srcs(self):
         # _parse_target already rejects this at parse time, but
         # run_test must never silently report success if it somehow

@@ -106,6 +106,8 @@ def run_test(target: Target, root: Path) -> ActionResult:
     stdout_parts = []
     stderr_parts = []
     failed_modules: list[str] = []
+    timed_out: list[str] = []
+    ran_nothing: list[str] = []
 
     env = os.environ.copy()
     root_str = str(root.resolve())
@@ -136,26 +138,50 @@ def run_test(target: Target, root: Path) -> ActionResult:
                 timeout=TEST_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired as e:
+            # Recorded and carried on, not returned: bailing out here
+            # let one hung src hide every src after it, which is the
+            # asymmetry accumulating failures was meant to remove. A
+            # hung test often does mean the whole target is wedged, but
+            # that is a guess, and guessing costs the other results.
             stdout_parts.append(e.stdout or "")
             stderr_parts.append(e.stderr or "")
-            return ActionResult(
-                target.label,
-                False,
-                f"{module} timed out after {TEST_TIMEOUT_SECONDS}s",
-                "\n".join(stdout_parts),
-                "\n".join(stderr_parts),
-            )
+            failed_modules.append(module)
+            timed_out.append(module)
+            continue
         stdout_parts.append(proc.stdout)
         stderr_parts.append(proc.stderr)
-        if proc.returncode != 0:
+        # A module with no tests exits 5 (NO TESTS RAN) on 3.12+, but
+        # exits 0 on 3.11 -- which pyproject.toml still supports -- so
+        # a green exit code alone reports a false PASS for a test file
+        # that tests nothing. The "Ran 0 tests" summary line is written
+        # on every version, so it is the portable signal.
+        #
+        # Checked independently of the exit code rather than as a
+        # fallback for a zero one, so the reason is named on 3.12 too,
+        # where the exit code already catches it but explains nothing.
+        # It can only ever add to the failure, never excuse one.
+        ran_no_tests = "Ran 0 tests" in proc.stderr
+        if proc.returncode != 0 or ran_no_tests:
             failed_modules.append(module)
+        if ran_no_tests:
+            ran_nothing.append(module)
 
     if failed_modules:
+        detail = (
+            f"{len(failed_modules)} of {len(target.srcs)} src files failed: "
+            f"{', '.join(failed_modules)}"
+        )
+        if timed_out:
+            detail += (
+                f" -- timed out after {TEST_TIMEOUT_SECONDS}s: "
+                f"{', '.join(timed_out)}"
+            )
+        if ran_nothing:
+            detail += f" -- contained no tests: {', '.join(ran_nothing)}"
         return ActionResult(
             target.label,
             False,
-            f"{len(failed_modules)} of {len(target.srcs)} src files failed: "
-            f"{', '.join(failed_modules)}",
+            detail,
             "\n".join(stdout_parts),
             "\n".join(stderr_parts),
         )

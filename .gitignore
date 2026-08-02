@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .lirk-cache.json
+.lirk-cache.json.*.tmp
 docs/_site/
 .jekyll-cache/
 .jekyll-metadata

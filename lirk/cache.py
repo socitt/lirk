@@ -26,7 +26,7 @@ class CacheError(Exception):
 # Bump this whenever the behaviour of `validate_target` or `run_test`
 # changes, so existing caches are invalidated instead of trusting a
 # green result computed under different rules.
-ACTION_VERSION = 7
+ACTION_VERSION = 8
 
 
 def _hash_file(path: Path, label: str) -> str:
@@ -119,10 +119,20 @@ def save_cache(path: Path, fingerprints: dict[str, str]) -> None:
     # Write to a sibling temp file and rename it into place, so an
     # interrupted write can never leave a truncated cache -- os.replace
     # is atomic, unlike write_text directly to `path`.
-    tmp_path = path.with_name(path.name + ".tmp")
+    #
+    # The PID is in the temp filename because two concurrent lirk runs
+    # would otherwise write the same path and could replace each
+    # other's partially-written file. That does not make concurrent
+    # runs safe -- load/save is still an unlocked read-modify-write, so
+    # overlapping runs can lose one run's entries -- but a lost entry
+    # only costs a redundant rebuild, whereas a torn temp file is a
+    # corrupt cache.
+    tmp_path = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp_path.write_text(json.dumps(fingerprints, indent=2, sort_keys=True) + "\n")
     os.replace(tmp_path, path)
 
 
-def needs_build(label: str, fingerprint: str, cache: dict[str, str]) -> bool:
-    return cache.get(label) != fingerprint
+def needs_build(cache_key: str, fingerprint: str, cache: dict[str, str]) -> bool:
+    """`cache_key` is "<mode>:<label>", not a bare label -- build and
+    test results for one target are cached separately."""
+    return cache.get(cache_key) != fingerprint

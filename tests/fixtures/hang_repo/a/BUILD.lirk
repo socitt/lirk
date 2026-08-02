@@ -2,3 +2,8 @@
 name = "hang_test"
 type = "test"
 srcs = ["test_hang.py"]
+
+[[target]]
+name = "hang_then_more_test"
+type = "test"
+srcs = ["test_hang.py", "test_after.py"]
