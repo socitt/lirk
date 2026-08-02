@@ -1,0 +1,4 @@
+[[target]]
+name = "subdir_test"
+type = "test"
+srcs = ["test_top.py", "sub/test_nested.py"]

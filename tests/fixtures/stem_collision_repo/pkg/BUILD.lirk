@@ -1,0 +1,4 @@
+[[target]]
+name = "collide_test"
+type = "test"
+srcs = ["one/test_dup.py", "two/test_dup.py"]

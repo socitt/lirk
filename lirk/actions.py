@@ -107,7 +107,14 @@ def run_test(target: Target, root: Path) -> ActionResult:
     )
 
     for src in target.srcs:
-        module = Path(src).stem
+        # Dotted path relative to the package, not just the stem: a src
+        # in a subdirectory ("sub/test_nested.py") must run as
+        # `sub.test_nested`, since `-m unittest test_nested` with
+        # cwd=pkg_dir cannot find it. Resolves without __init__.py --
+        # sub/ is importable as a namespace package (PEP 420).
+        # Using the stem alone also silently collided two srcs with the
+        # same filename in different subdirectories onto one module.
+        module = Path(src).with_suffix("").as_posix().replace("/", ".")
         try:
             proc = subprocess.run(
                 [sys.executable, "-m", "unittest", module],

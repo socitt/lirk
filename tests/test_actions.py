@@ -194,6 +194,31 @@ class RunTestTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("missing.py", result.message)
 
+    def test_runs_a_test_src_in_a_package_subdirectory(self):
+        # "sub/test_nested.py" must run as the module `sub.test_nested`;
+        # deriving the stem alone made it an unexplained ModuleNotFoundError.
+        root = FIXTURES / "subdir_test_repo"
+        graph = build_graph(root)
+        target = graph.targets["//pkg:subdir_test"]
+
+        result = run_test(target, root)
+
+        self.assertTrue(result.ok, result.message)
+
+    def test_same_stem_in_different_subdirectories_does_not_collide(self):
+        # Both srcs are named test_dup.py; under the stem-only derivation
+        # they became one module name and only one of the two ever ran.
+        root = FIXTURES / "stem_collision_repo"
+        graph = build_graph(root)
+        target = graph.targets["//pkg:collide_test"]
+
+        result = run_test(target, root)
+
+        self.assertFalse(result.ok)
+        # The failing one is one/test_dup.py; two/test_dup.py passes.
+        self.assertIn("one.test_dup", result.message)
+        self.assertNotIn("two.test_dup", result.message)
+
 
 if __name__ == "__main__":
     unittest.main()
