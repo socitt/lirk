@@ -11,12 +11,53 @@ from dataclasses import dataclass
 from pathlib import Path
 
 BUILD_FILENAME = "BUILD.lirk"
+ROOT_MARKER = ".lirk-root"
 VALID_TYPES = {"library", "test"}
 KNOWN_KEYS = {"name", "type", "srcs", "deps", "data"}
+ROOT_CONFIG_KEYS = {"ignore"}
 
 
 class ConfigError(Exception):
     """A BUILD.lirk file is missing, malformed, or invalid."""
+
+
+def load_ignores(root: Path) -> tuple[str, ...]:
+    """Read the optional `ignore` list from the repo's .lirk-root marker.
+
+    The marker doubles as repo-level config: an empty file means "the
+    root is here" and nothing more, which is what it meant before this
+    existed, so existing repos are unaffected. TOML content adds to it:
+
+        ignore = ["tests/fixtures", "vendor"]
+
+    Each entry is a directory path relative to the repo root, excluded
+    from the BUILD.lirk scan along with everything beneath it. This is
+    for directories that legitimately contain BUILD.lirk files that are
+    not this repo's targets -- test fixtures, a vendored dependency, a
+    nested checkout -- which the dot-prefix rule alone cannot express.
+    """
+    marker = root / ROOT_MARKER
+    if not marker.is_file():
+        return ()
+
+    try:
+        with marker.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"{marker}: invalid TOML: {e}") from e
+
+    unknown = sorted(set(data) - ROOT_CONFIG_KEYS)
+    if unknown:
+        raise ConfigError(f"{marker}: unknown key(s): {', '.join(unknown)}")
+
+    ignore = _string_list(data.get("ignore", []), "ignore", str(marker))
+    for entry in ignore:
+        if entry.startswith("/") or ".." in Path(entry).parts:
+            raise ConfigError(
+                f"{marker}: ignore entry {entry!r} must be a path relative to "
+                "the repo root, without '..'"
+            )
+    return tuple(ignore)
 
 
 @dataclass(frozen=True)

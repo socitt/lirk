@@ -1,0 +1,7 @@
+# Deliberately broken: depends on a target that does not exist. If the
+# ignore list fails, loading this repo's graph fails outright.
+[[target]]
+name = "vendored"
+type = "library"
+srcs = ["nothing_here.py"]
+deps = ["//does/not:exist"]

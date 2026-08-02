@@ -27,6 +27,14 @@ class BuildGraphTests(unittest.TestCase):
             },
         )
 
+    def test_ignore_list_excludes_a_directory_and_its_subtree(self):
+        # ignore_repo's .lirk-root ignores "vendor". Both vendor/BUILD.lirk
+        # and vendor/nested/BUILD.lirk declare deps on targets that don't
+        # exist, so if either is scanned, build_graph raises.
+        graph = build_graph(FIXTURES / "ignore_repo")
+
+        self.assertEqual(set(graph.targets), {"//real:real_lib"})
+
     def test_resolves_absolute_and_relative_deps(self):
         graph = build_graph(FIXTURES / "sample_repo")
 

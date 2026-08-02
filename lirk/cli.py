@@ -20,10 +20,9 @@ from lirk.cache import (
     save_cache,
 )
 from lirk.graph import Graph, GraphError, build_graph, topological_sort, transitive_closure
-from lirk.targets import ConfigError
+from lirk.targets import ROOT_MARKER, ConfigError
 
 ALL_TARGETS = "//..."
-ROOT_MARKER = ".lirk-root"
 
 
 def _discover_root(start: Path) -> Path:

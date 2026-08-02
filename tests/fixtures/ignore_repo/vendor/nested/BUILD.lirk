@@ -1,0 +1,7 @@
+# Also broken, and one level deeper: the ignore must cover the whole
+# subtree, not just the named directory itself.
+[[target]]
+name = "nested_vendored"
+type = "library"
+srcs = ["nothing_here_either.py"]
+deps = ["//also/not:exist"]

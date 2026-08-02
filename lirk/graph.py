@@ -11,25 +11,33 @@ root). Dependencies reference other targets by label:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from lirk.targets import BUILD_FILENAME, Target, parse_build_file
+from lirk.targets import BUILD_FILENAME, Target, load_ignores, parse_build_file
 
 
 class GraphError(Exception):
     """Bad labels, missing dependencies, self-deps, or dependency cycles."""
 
 
-def find_build_files(root: Path) -> list[Path]:
+def find_build_files(root: Path, ignore: Sequence[str] = ()) -> list[Path]:
     """Every BUILD.lirk under root, except under a dot-prefixed
     directory (.venv, node_modules/.bin, a nested checkout of lirk
     itself, etc.) -- checked relative to root, so root itself living
-    under a dotted ancestor directory doesn't matter."""
+    under a dotted ancestor directory doesn't matter.
+
+    `ignore` additionally excludes the given root-relative directories
+    and everything beneath them; see targets.load_ignores.
+    """
+    ignored = [Path(entry.strip("/")) for entry in ignore if entry.strip("/")]
     found = []
     for path in root.rglob(BUILD_FILENAME):
         rel_dir = path.relative_to(root).parent
         if any(part.startswith(".") for part in rel_dir.parts):
+            continue
+        if any(rel_dir == ig or ig in rel_dir.parents for ig in ignored):
             continue
         found.append(path)
     return sorted(found)
@@ -43,7 +51,7 @@ def package_for(build_file: Path, root: Path) -> str:
 def load_targets(root: Path) -> dict[str, Target]:
     """Parse every BUILD.lirk under root, keyed by fully-qualified label."""
     targets: dict[str, Target] = {}
-    for build_file in find_build_files(root):
+    for build_file in find_build_files(root, load_ignores(root)):
         package = package_for(build_file, root)
         for target in parse_build_file(build_file, package):
             if target.label in targets:

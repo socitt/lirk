@@ -1,0 +1,4 @@
+[[target]]
+name = "real_lib"
+type = "library"
+srcs = ["real.py"]

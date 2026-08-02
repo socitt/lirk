@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lirk.targets import ConfigError, parse_build_file
+from lirk.targets import ROOT_MARKER, ConfigError, load_ignores, parse_build_file
 
 
 class ParseBuildFileTests(unittest.TestCase):
@@ -184,6 +184,53 @@ class ParseBuildFileTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ConfigError, "array of tables"):
             parse_build_file(path, package="pkg")
+
+
+class LoadIgnoresTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.root = Path(self._tmpdir.name)
+
+    def _write_marker(self, contents: str) -> None:
+        (self.root / ROOT_MARKER).write_text(contents)
+
+    def test_absent_marker_yields_no_ignores(self):
+        self.assertEqual(load_ignores(self.root), ())
+
+    def test_empty_marker_yields_no_ignores(self):
+        # The marker predates carrying any config; an empty one has
+        # always meant "the root is here" and must keep meaning that.
+        self._write_marker("")
+        self.assertEqual(load_ignores(self.root), ())
+
+    def test_reads_the_ignore_list(self):
+        self._write_marker('ignore = ["tests/fixtures", "vendor"]\n')
+        self.assertEqual(load_ignores(self.root), ("tests/fixtures", "vendor"))
+
+    def test_rejects_unknown_keys(self):
+        self._write_marker('ignroe = ["vendor"]\n')
+        with self.assertRaisesRegex(ConfigError, r"unknown key\(s\): ignroe"):
+            load_ignores(self.root)
+
+    def test_rejects_non_list_ignore(self):
+        self._write_marker('ignore = "vendor"\n')
+        with self.assertRaisesRegex(ConfigError, "'ignore' must be a list of strings"):
+            load_ignores(self.root)
+
+    def test_rejects_invalid_toml(self):
+        self._write_marker("ignore = [\n")
+        with self.assertRaisesRegex(ConfigError, "invalid TOML"):
+            load_ignores(self.root)
+
+    def test_rejects_absolute_and_parent_paths(self):
+        # An ignore entry escaping the repo root is meaningless at best
+        # and surprising at worst, so it's rejected rather than clamped.
+        for bad in ("/etc", "../outside", "a/../../outside"):
+            with self.subTest(entry=bad):
+                self._write_marker(f'ignore = ["{bad}"]\n')
+                with self.assertRaisesRegex(ConfigError, "relative to the repo root"):
+                    load_ignores(self.root)
 
 
 if __name__ == "__main__":
