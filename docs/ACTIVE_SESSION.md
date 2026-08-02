@@ -21,6 +21,22 @@ has the originals.
 
 ---
 
+## 2026-08-02
+
+- **M1 and M2 both landed**, suite 91 → 95, all green. Details in
+  TASKS.md "Recently closed"; the behavior changes are written up in
+  DESIGN.md §3 and §4 rather than here.
+- **Decided criterion 2's repo-count clause**: self-hosting counts as
+  the second repo. This puts criterion 1 on the critical path for both
+  criteria, and leaves one more consumer repo to find.
+- **Next:** self-hosting — a `BUILD.lirk` for `lirk/`'s modules and
+  `tests/`. The two open questions from TASKS.md criterion 1 still need
+  answers when starting: whether `lirk test //...` replaces the
+  `unittest discover` invocation or runs alongside it, and whether
+  `tests/`' fixture-by-relative-path imports resolve under
+  `cwd=pkg_dir` + `PYTHONPATH=root`. M2's fix removes the subdirectory
+  obstacle that would otherwise have complicated the `tests/` layout.
+
 ## 2026-07-30
 
 - **Consolidated the docs.** Wrote `docs/DESIGN.md` (current-state

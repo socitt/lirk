@@ -154,8 +154,9 @@ flowchart TD
     C --> D["build graph, topological sort"]
     D --> E["narrow to requested target's transitive closure"]
     E --> P["preflight: every declared src/data file exists?"]
-    P -- "any missing" --> X["FAIL per target, abort run"]
-    P -- all present --> F["content-hash fingerprint each target"]
+    P -- "missing" --> X["FAIL that target, exclude it\nand its dependents from fingerprinting"]
+    P -- present --> F["content-hash fingerprint each target"]
+    X --> F
     F --> S{"any direct dep already failed?"}
     S -- yes --> K["SKIP, do not cache"]
     S -- no --> G{"fingerprint matches .lirk-cache.json?"}
@@ -176,6 +177,17 @@ message that the CLI can never reach. So `cli.py:_execute` checks
 `missing_files()` across the whole scope first. `_hash_file` also
 guards `OSError` into a `CacheError` as defense-in-depth for direct
 callers.
+
+The preflight *marks* rather than aborts. A target with missing files
+is added to `failed` and reported, and unrelated targets go on to build
+normally — one stale filename must not blank the whole repo. What it
+must not do is reach `compute_fingerprints`, which reads
+`fingerprints[dep]` for every dependency and would `KeyError` on an
+excluded one. So the missing-file targets *and their transitive
+dependents* are removed from `order` before fingerprinting; because
+`order` is topological, a single forward pass propagates that
+exclusion. The dependents are still reported, by the ordinary SKIP
+branch below.
 
 **Failure propagates as SKIP.** `_execute` keeps a `failed: set[str]`.
 Topological order guarantees deps are processed first, so checking one
@@ -271,9 +283,13 @@ subprocess.run(
 )
 ```
 
-- **`module` is `Path(src).stem`**, with `cwd` set to the package
-  directory. This is why srcs in a package *subdirectory* work in a
-  `library` target and fail in a `test` target — see TASKS.md.
+- **`module` is the src path relative to the package, dotted**
+  (`sub/test_nested.py` → `sub.test_nested`), with `cwd` set to the
+  package directory. Subdirectories need no `__init__.py`: they import
+  as PEP 420 namespace packages. Deriving `Path(src).stem` instead —
+  as lirk did through `ACTION_VERSION` 6 — broke subdirectory srcs with
+  a bare `ModuleNotFoundError`, and silently collapsed two same-named
+  srcs in different subdirectories onto one module.
 - **`env` prepends the repo root to `PYTHONPATH`.** Flat sibling
   imports (`from a import greet`) resolve via `cwd` being
   `sys.path[0]`; root-relative imports (`from shared import term`, the

@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source: 91 tests, `python3 -m unittest discover
+Last verified against source: 95 tests, `python3 -m unittest discover
 -s tests -t .`.
 
 ---
@@ -74,23 +74,12 @@ invocation is against a single consumer, `terminal-projects`. That is
 one repo, not three, and no amount of additional running against it
 will change that.
 
-**Decision needed — this is a judgment call, not a task.** Pick one:
-
-- **Find two more consumers.** Highest-value evidence, since a second
-  and third repo is exactly what would surface assumptions baked in by
-  a single consumer's conventions (flat package layouts, one
-  `main_test.py` per game, `shared/` cross-package deps). Also the
-  slowest.
-- **Count self-hosting as the second repo.** lirk building itself is
-  a genuinely different shape from a games monorepo — different
-  dependency topology, different test style. Would leave one to find.
-  Depends on criterion 1 landing first.
-- **Revise the clause with a stated reason.** Defensible if lirk is
-  only ever meant to serve one monorepo; the clause was written to
-  guard against overfitting to one consumer, and if there is only ever
-  going to be one consumer, that risk is hypothetical. Requires
-  editing the README's criteria, which is why it needs your call
-  rather than mine — these were deliberately made non-subjective.
+**Decided 2026-08-02: self-hosting counts as the second repo.** lirk
+building itself is a genuinely different shape from a games monorepo —
+different dependency topology, different test style — so it exercises
+the overfitting risk the clause was written to guard against. This
+makes criterion 1 a prerequisite for criterion 2 rather than an
+independent item, and leaves **one more consumer to find**.
 
 ### 3. KNOWN_ISSUES.md clear — ✅ MET
 
@@ -113,52 +102,7 @@ Nothing. No known silent-wrong-pass path is currently open.
 
 ### MEDIUM
 
-**M1 — One missing source file aborts the entire repo-wide run.**
-`cli.py:_execute`'s preflight loop checks `missing_files()` across
-every target in scope, then `return`s if *any* target failed. So a
-single stale filename in one package's `BUILD.lirk` prevents every
-other, unrelated target in the repo from building or testing — while
-the failed-dependency path right below it does the strictly better
-thing (FAIL that target, SKIP only its dependents, proceed with the
-rest). The abort exists for a real ordering reason (`compute_fingerprints`
-would otherwise hit the missing file first, see DESIGN.md §3), but the
-blast radius is wider than it needs to be.
-
-*Fix direction:* fingerprint and execute only the targets whose files
-are all present, marking the missing-file targets as failed so the
-existing `failed` set skips their dependents naturally. The ordering
-constraint is satisfied by excluding them from `order` before calling
-`compute_fingerprints`, not by aborting.
-
-*Acceptance:* a fixture repo where `//a` has a missing src and `//b` is
-unrelated — `lirk build //...` reports `FAIL //a:...`, `built //b:...`,
-and exits 1.
-
-**M2 — Test srcs in a package subdirectory fail with an unexplained
-`ModuleNotFoundError`.** `run_test` derives the module name as
-`Path(src).stem` and runs `python3 -m unittest <stem>` with
-`cwd=pkg_dir`. So `srcs = ["sub/test_helper.py"]` is valid in a
-`library` target and broken in a `test` target — same path, same
-package, opposite outcomes, with an error message that explains
-nothing. Second consequence: two srcs with the same stem in different
-subdirectories silently collide on one module name.
-
-The failure is loud, which is why this is MEDIUM and not HIGH. It is
-the piece most likely to strain the first time a consumer organizes a
-target into subdirectories rather than flat files.
-
-*Fix direction:* derive a dotted module path from the src path
-relative to the package
-(`Path(src).with_suffix("").as_posix().replace("/", ".")`) and confirm
-it resolves under the existing `cwd`/`PYTHONPATH` model. Bump
-`ACTION_VERSION` in the same commit — this changes what running a test
-means. Alternatively, if it stays unsupported, reject a `test` target
-whose `srcs` contain a path separator at parse time, so the error names
-the actual problem.
-
-*Acceptance:* a fixture with `sub/test_helper.py` in a `test` target
-either runs correctly, or fails at parse time with a message naming the
-subdirectory as the reason.
+Nothing. M1 and M2 are closed — see Recently closed.
 
 ### LOW
 
@@ -226,22 +170,38 @@ status. *What's left:* paste the issue link in.
 
 ## Next actions, in priority order
 
-1. **Decide criterion 2's repo-count clause** (see above). It is the
-   only thing standing between the track-record criterion and being
-   met, and it's a call only you can make.
-2. **M1**, then **M2**. Both are correctness-adjacent and both are
-   contained to one function. Both change execution behavior, so both
-   need `ACTION_VERSION` bumped in the same commit.
-3. **Self-hosting (criterion 1).** The largest item, and the one that
-   turns lirk from a tool that works into a tool that's proven. Worth
-   doing after M1/M2 so it isn't fighting known rough edges — and it
-   may also resolve criterion 2's second repo.
-4. **D1**, alongside or after self-hosting, so the published status
+1. **Self-hosting (criterion 1).** Now the largest open item and the
+   critical path for two criteria at once, since it also counts as
+   criterion 2's second repo. M2's fix means a `tests/` layout with
+   subdirectories is no longer a blocker for it.
+2. **Find a third consumer repo** — the last thing criterion 2 needs
+   after self-hosting lands.
+3. **D1**, alongside or after self-hosting, so the published status
    text and the real status agree.
-5. **D2**, whenever convenient — one look at the live site.
-6. LOW items opportunistically; none block anything.
+4. **D2**, whenever convenient — one look at the live site.
+5. LOW items opportunistically; none block anything.
 
 ## Recently closed
+
+- **M1 — one missing source file no longer aborts the repo-wide run**
+  (2026-08-02). The preflight loop now marks missing-file targets
+  failed instead of `return`ing, and excludes them plus their
+  transitive dependents from `order` before `compute_fingerprints`
+  (which would `KeyError` on an absent dep fingerprint otherwise).
+  Dependents are reported by the existing dep_failure SKIP branch, and
+  unrelated targets build and reach the cache normally. No
+  `ACTION_VERSION` bump — this changes which targets are attempted, not
+  what a successful build means. Fixture: `missing_src_partial_repo`.
+- **M2 — test srcs in a package subdirectory now run** (2026-08-02).
+  `run_test` derives a dotted module path relative to the package
+  rather than `Path(src).stem`, so `sub/test_nested.py` runs as
+  `sub.test_nested`. Verified to resolve under the existing
+  `cwd=pkg_dir` + `PYTHONPATH=root` model with no `__init__.py` needed
+  (PEP 420 namespace packages). Also fixes the silent same-stem
+  collision, where two srcs named `test_dup.py` in different
+  subdirectories became one module and only one ever ran.
+  `ACTION_VERSION` 6 → 7. Fixtures: `subdir_test_repo`,
+  `stem_collision_repo`.
 
 - **Suite was 90/91 on Windows** (2026-07-30). `validate_target`'s
   `read_text()` used the locale encoding, so cp1252 decoded the
