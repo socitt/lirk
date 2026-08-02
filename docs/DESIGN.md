@@ -102,10 +102,17 @@ edges, which meant changes to the real dependency never invalidated it.
 A `test` target with **no srcs** is also rejected: the run loop would
 otherwise spawn nothing and report a pass.
 
-`data` files are fingerprinted exactly like `srcs` but never
+`data` entries are fingerprinted exactly like `srcs` but never
 `ast.parse`d — that's the whole reason the field exists. A `.txt`
 fixture in `srcs` produces a bogus syntax error; the same file left
 undeclared entirely means edits to it never invalidate anything.
+
+A `data` entry may name a **directory**, fingerprinted recursively.
+This is not a convenience: a hand-maintained file list is the failure
+mode it prevents. Declaring 61 fixture files individually works exactly
+until someone adds the 62nd and forgets, at which point the target
+reports a cached PASS against inputs that changed — silently, and
+indistinguishably from a real pass.
 
 ### Labels
 
@@ -142,6 +149,26 @@ The **downward** scan (`find_build_files`) skips any `BUILD.lirk` under
 a dot-prefixed directory, checked relative to root. Without that, a
 vendored or nested checkout under `.venv/` gets pulled into an
 unrelated repo-wide build.
+
+The dot-prefix rule alone is not enough, because plenty of directories
+that hold foreign `BUILD.lirk` files are not dot-prefixed —
+`node_modules/`, `vendor/`, and a test-fixture tree. So `.lirk-root`
+doubles as repo config, carrying an optional `ignore` list of
+root-relative directories to exclude along with their subtrees. An
+empty marker still means exactly what it meant before the key existed,
+so no existing repo changes behavior.
+
+This is what makes lirk's own self-hosting possible at all:
+`tests/fixtures/` contains 24 `BUILD.lirk` files that are *inputs to
+lirk's tests*, several deliberately broken (cycles, dangling deps) to
+exercise error paths. Scanned as real targets, they make the graph fail
+to load before a single target runs.
+
+`ignore` is deliberately separate from `data`: `ignore` decides what is
+*scanned*, `data` decides what is *fingerprinted*. A fixture tree is
+correctly both — not this repo's targets, but very much its inputs, and
+`tests/BUILD.lirk` declares `data = ["fixtures"]` for exactly that
+reason.
 
 ---
 
@@ -220,8 +247,17 @@ having actually run it. This guards a bug that really shipped.
 1. target `name` and `type`
 2. `ACTION_VERSION`
 3. each `srcs` entry, **sorted**: filename + SHA-256 of contents
-4. each `data` entry, sorted: filename + SHA-256 of contents
+4. each `data` entry, sorted: name, then either its SHA-256 (a file)
+   or, for a directory, every file beneath it sorted by relative path,
+   each contributing that path **and** its SHA-256
 5. each dep label, **sorted**: label + that dep's fingerprint
+
+The relative path of each file inside a data directory is hashed, not
+just its contents, so adding or removing a file changes the fingerprint
+even when nothing was edited. Dot-prefixed and `__pycache__` segments
+are excluded: they are generated, and a fixture tree containing Python
+accrues `.pyc` files from running the very tests this fingerprint
+gates, which would change the input on every run and cache nothing.
 
 Consequences worth stating explicitly:
 

@@ -29,13 +29,19 @@ has the originals.
 - **Decided criterion 2's repo-count clause**: self-hosting counts as
   the second repo. This puts criterion 1 on the critical path for both
   criteria, and leaves one more consumer repo to find.
-- **Next:** self-hosting — a `BUILD.lirk` for `lirk/`'s modules and
-  `tests/`. The two open questions from TASKS.md criterion 1 still need
-  answers when starting: whether `lirk test //...` replaces the
-  `unittest discover` invocation or runs alongside it, and whether
-  `tests/`' fixture-by-relative-path imports resolve under
-  `cwd=pkg_dir` + `PYTHONPATH=root`. M2's fix removes the subdirectory
-  obstacle that would otherwise have complicated the `tests/` layout.
+- **Self-hosting landed — criterion 1 is met.** `lirk build //...`
+  builds 13 targets, `lirk test //...` is 5/5 green. Runs alongside
+  `unittest discover`, not instead of it. Suite 95 → 110.
+- Attempting it forced three engine changes, none of which were
+  predictable from reading the source: the fixture scan (L4, promoted
+  from LOW — the graph would not load at all), `data` directories, and
+  the stale-PASS those two jointly fixed. Details in TASKS.md
+  "Recently closed"; behavior is written up in DESIGN.md §2 and §4.
+- **Next:** find a third consumer repo. That is now the *only* thing
+  between the project and all three v1 criteria. After that, D1 —
+  `docs/index.md` is doubly stale now, still claiming "not yet
+  self-hosting" and predating both `.lirk-root` config and `data`
+  directories.
 
 ## 2026-07-30
 

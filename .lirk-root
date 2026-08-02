@@ -1,0 +1,7 @@
+# Marks the repo root for lirk's own self-hosted build.
+#
+# tests/fixtures holds ~24 BUILD.lirk files that are test *inputs*, not
+# this repo's targets -- several are deliberately broken (cycles,
+# dangling deps, syntax errors) to exercise lirk's error paths. Scanning
+# them makes the graph fail to load before anything runs.
+ignore = ["tests/fixtures"]

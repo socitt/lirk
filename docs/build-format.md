@@ -31,12 +31,24 @@ deps = [":mylib"]
   to `[]`. Label resolution (`//path:name` vs `:name`) happens when
   the dependency graph is built across all packages, not at parse
   time.
-- **`data`** — list of file paths relative to the package directory,
-  for files the target depends on that are not Python source (e.g. a
+- **`data`** — list of paths relative to the package directory, for
+  things the target depends on that are not Python source (e.g. a
   `.txt` fixture read at runtime). Defaults to `[]`. Fingerprinted the
-  same way as `srcs` so changes invalidate the cache, but files listed
-  here are not syntax-checked — putting a non-Python file in `srcs`
-  instead produces a bogus syntax error.
+  same way as `srcs` so changes invalidate the cache, but entries here
+  are not syntax-checked — putting a non-Python file in `srcs` instead
+  produces a bogus syntax error.
+
+  An entry may name a **directory**, which is fingerprinted
+  recursively: editing, adding, or removing any file beneath it
+  invalidates the target. Use this for a fixture tree rather than
+  listing files individually — a hand-maintained list goes stale
+  silently, and a fixture you forgot to declare gives you a cached
+  PASS against inputs that changed. Two kinds of path are skipped
+  inside a data directory, because they are generated rather than
+  declared: dot-prefixed names, and `__pycache__`. Without that, a
+  fixture tree containing Python would accumulate `.pyc` files as a
+  side effect of running the very tests whose fingerprint it feeds,
+  and nothing would ever stay cached.
 
 Unknown keys in a `[[target]]` table are rejected, and a `test`
 target with no `srcs` is rejected — both fail at parse time rather
@@ -84,3 +96,31 @@ Without the marker, lirk silently scopes to whatever directory it was
 invoked from, which can make targets outside that subtree look
 "missing" rather than out of scope. `--root <path>` overrides
 discovery entirely.
+
+### Excluding directories from the scan
+
+`.lirk-root` may be empty, or may carry repo-level config as TOML. The
+one key it accepts is `ignore`:
+
+```toml
+ignore = ["tests/fixtures", "vendor"]
+```
+
+Each entry is a directory path relative to the repo root; it and
+everything beneath it are excluded from the `BUILD.lirk` scan. Entries
+must stay inside the repo — an absolute path or one containing `..` is
+rejected rather than quietly clamped. Unknown keys are rejected, as in
+`BUILD.lirk`.
+
+Directories whose name starts with `.` are always skipped and need no
+entry. `ignore` is for the rest: a vendored dependency, a nested
+checkout, or a test-fixture tree whose `BUILD.lirk` files are inputs to
+your tests rather than targets of your repo. lirk's own repo is the
+motivating case — `tests/fixtures/` holds deliberately broken
+`BUILD.lirk` files (cycles, dangling deps) that would otherwise make
+the graph fail to load before anything ran.
+
+Note that `ignore` and `data` are independent. `ignore` governs which
+`BUILD.lirk` files are *scanned*; `data` governs what gets
+*fingerprinted*. A fixture directory is legitimately both — not your
+targets, but still your inputs.

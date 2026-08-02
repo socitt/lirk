@@ -1,0 +1,47 @@
+# lirk's own modules. Deps mirror the real import graph in the sources;
+# see docs/DESIGN.md for why the layering is shaped this way.
+#
+# Everything depends on :init transitively, because importing any
+# lirk.<module> executes lirk/__init__.py first -- an edit to it really
+# does invalidate every module below.
+
+[[target]]
+name = "init"
+type = "library"
+srcs = ["__init__.py"]
+
+[[target]]
+name = "targets"
+type = "library"
+srcs = ["targets.py"]
+deps = [":init"]
+
+[[target]]
+name = "graph"
+type = "library"
+srcs = ["graph.py"]
+deps = [":targets"]
+
+[[target]]
+name = "actions"
+type = "library"
+srcs = ["actions.py"]
+deps = [":targets"]
+
+[[target]]
+name = "cache"
+type = "library"
+srcs = ["cache.py"]
+deps = [":graph"]
+
+[[target]]
+name = "cli"
+type = "library"
+srcs = ["cli.py"]
+deps = [":actions", ":cache", ":graph", ":targets"]
+
+[[target]]
+name = "main"
+type = "library"
+srcs = ["__main__.py"]
+deps = [":cli"]

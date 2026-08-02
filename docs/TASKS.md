@@ -9,8 +9,11 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source: 95 tests, `python3 -m unittest discover
--s tests -t .`.
+Last verified against source: 110 tests, `python3 -m unittest discover
+-s tests -t .`. lirk also builds and tests itself — `lirk build //...`
+(13 targets) and `lirk test //...` (5 test targets) — which runs
+alongside the unittest invocation rather than replacing it. Both must
+be green.
 
 ---
 
@@ -20,27 +23,35 @@ All three must hold before parallelism work starts or scope expands
 beyond Python `library`/`test` targets. Status is honest, not
 optimistic — "probably true" counts as not met.
 
-### 1. Self-hosting — ❌ NOT MET
+### 1. Self-hosting — ✅ MET (2026-08-02)
 
 lirk builds and tests its own source through its own `BUILD.lirk`
 files (`lirk build //...` and `lirk test //...` against this repo), not
 only via a separately maintained `unittest` suite.
 
-**Status:** no `BUILD.lirk` exists anywhere in this repo outside
-`tests/fixtures/`. Nothing started.
+**Status:** `lirk/BUILD.lirk` and `tests/BUILD.lirk` describe 13
+targets whose deps mirror the real import graph. `lirk build //...`
+builds 13/13; `lirk test //...` runs the suite through lirk, 5/5 test
+targets green (all 110 underlying tests) in ~2m45s.
 
-**What it needs:** a `BUILD.lirk` describing `lirk/`'s modules as
-`library` targets with their real inter-module deps
-(`cli` → `actions`/`cache`/`graph`/`targets`; `cache` → `graph`;
-`graph` → `targets`), plus `tests/` as `test` targets. Two decisions to
-make when starting:
+Decisions made when this landed:
 
-- Does `lirk test //...` *replace* the `unittest discover` invocation
-  or run alongside it? Replacing it makes lirk's own CI depend on lirk
-  being correct, which is the point of self-hosting and also the risk.
-- `tests/` imports fixtures by relative path from the repo root.
-  Confirm that resolves under `run_test`'s `cwd=pkg_dir` +
-  `PYTHONPATH=root` model before assuming the layout works as-is.
+- **`lirk test //...` runs *alongside* `unittest discover`, not instead
+  of it.** `unittest discover` stays the source of truth. Self-hosting
+  is the proof, not the safety net — a lirk bug that reported false
+  green would otherwise have no independent check, and a cache bug
+  could mask a real regression indefinitely. Both must be green.
+- **Fixture imports were never at risk.** The concern recorded here was
+  that `tests/` resolves fixtures by path relative to the repo root; in
+  fact all four modules derive `FIXTURES` from `Path(__file__).parent`,
+  which is cwd-independent and works unchanged under `cwd=pkg_dir`.
+- Longest single module is ~88s against a 600s `TEST_TIMEOUT_SECONDS`,
+  so there is ample headroom even with nested subprocesses.
+
+Getting here required three engine changes, all of which surfaced only
+by actually attempting it — see Recently closed for L4 (the fixture
+scan), the `data` directory support, and the stale-PASS they jointly
+fixed.
 
 ### 2. Track record on real repos — ❌ NOT MET (blocked on the repo-count clause, not the invocation count)
 
@@ -69,10 +80,21 @@ The true total is comfortably past 200 once uncounted build
 invocations are included — the two failure-mode sub-clauses are
 effectively satisfied.
 
-**The blocker is the "3 distinct repos" clause.** Every documented
-invocation is against a single consumer, `terminal-projects`. That is
-one repo, not three, and no amount of additional running against it
-will change that.
+**The blocker is the "3 distinct repos" clause.** The documented
+invocations above are all against a single consumer,
+`terminal-projects`, and no amount of additional running against it
+will change that. Self-hosting (criterion 1) now supplies the second
+repo. **One more consumer is what remains.**
+
+Worth recording honestly: self-hosting immediately produced a
+cache-correctness bug of exactly the shape this criterion forbids — a
+`cached` PASS against edited inputs — which is precisely the evidence a
+second repo was supposed to generate. It was a configuration gap
+(undeclared fixture `data`) rather than an engine defect, and the fix
+made the engine able to express the dependency at all. It is fixed and
+covered by tests; the criterion's zero-count is intact because the bug
+never escaped into a real consumer's usage. But it is the clearest
+possible argument for why the third repo matters.
 
 **Decided 2026-08-02: self-hosting counts as the second repo.** lirk
 building itself is a genuinely different shape from a games monorepo —
@@ -138,13 +160,6 @@ single-device workflow makes overlap unlikely. *Fix direction, if ever
 worth it:* include the PID in the temp filename (one line, removes the
 worse half of the problem) and leave the lost-entries half alone.
 
-**L4 — The downward repo scan skips dot-directories only.** Nothing
-excludes `node_modules/`, `vendor/`, or a nested non-dot checkout. The
-dot-prefix rule covers the realistic cases seen so far.
-
-*Fix direction, if it comes up:* an optional ignore list in a
-root-level config, not a hardcoded name list.
-
 **L5 — `needs_build`'s first parameter is named `label` but receives a
 cache key** (`"<mode>:<label>"`). Cosmetic; misleading when reading
 `cache.py` cold.
@@ -170,19 +185,44 @@ status. *What's left:* paste the issue link in.
 
 ## Next actions, in priority order
 
-1. **Self-hosting (criterion 1).** Now the largest open item and the
-   critical path for two criteria at once, since it also counts as
-   criterion 2's second repo. M2's fix means a `tests/` layout with
-   subdirectories is no longer a blocker for it.
-2. **Find a third consumer repo** — the last thing criterion 2 needs
-   after self-hosting lands.
-3. **D1**, alongside or after self-hosting, so the published status
-   text and the real status agree.
-4. **D2**, whenever convenient — one look at the live site.
-5. LOW items opportunistically; none block anything.
+1. **Find a third consumer repo.** The single thing standing between
+   v1 and all three criteria being met. Criteria 1 and 3 are met and
+   criterion 2 needs only this.
+2. **D1** — `docs/index.md` now contradicts reality twice over: it
+   still says "Not yet self-hosting", and it predates both `.lirk-root`
+   config and `data` directories. Bumped in priority accordingly.
+3. **D2**, whenever convenient — one look at the live site.
+4. LOW items opportunistically; none block anything.
 
 ## Recently closed
 
+- **Criterion 1: lirk is self-hosting** (2026-08-02). See the criterion
+  above for the shape and the decisions. `lirk test //...` runs
+  alongside `unittest discover`, not instead of it.
+- **L4 — the repo scan takes an ignore list** (2026-08-02). Promoted
+  from LOW the moment self-hosting was attempted: `tests/fixtures/`'s
+  24 `BUILD.lirk` files made `lirk build //...` fail to load the graph
+  at all (`//tests/fixtures/cycle_repo/x:x: dependency '//y:y' does not
+  exist`). `.lirk-root` now doubles as repo config carrying
+  `ignore = [...]` of root-relative directories, excluded with their
+  subtrees. An empty marker behaves exactly as before. Entries that are
+  absolute or contain `..` are rejected. Fixture: `ignore_repo`.
+- **`data` entries may name a directory** (2026-08-02). Fingerprinted
+  recursively, with each file's relative path hashed alongside its
+  contents so additions and removals register. Dot-prefixed and
+  `__pycache__` segments are skipped — a fixture tree accumulates
+  `.pyc` files from running the very tests the fingerprint gates, which
+  would otherwise change the input every run and cache nothing. No
+  `ACTION_VERSION` bump: file-only `data` fingerprints are unchanged,
+  so no existing cache entry is falsely invalidated.
+  Fixture: `datadir_repo`.
+- **Stale PASS on edited fixtures** (2026-08-02). Found by self-hosting
+  and verified directly: appending to a fixture that `test_targets`
+  reads left it `cached` and green. `tests/BUILD.lirk` now declares
+  `data = ["fixtures"]` on the four modules that read fixtures
+  (`test_targets` builds its inputs with `tempfile` and declares none).
+  Required the `data` directory support above — enumerating 61 files by
+  hand would have gone stale the next time a fixture was added.
 - **M1 — one missing source file no longer aborts the repo-wide run**
   (2026-08-02). The preflight loop now marks missing-file targets
   failed instead of `return`ing, and excludes them plus their

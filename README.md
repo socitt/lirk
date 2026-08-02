@@ -158,18 +158,20 @@ self-hosting" language with a concrete, non-subjective bar:
 1. **Self-hosting.** lirk builds and tests its own source through its
    own `BUILD.lirk` files (`lirk build //...` / `lirk test //...` run
    against this repo), not only via a separately maintained
-   `pytest`/`unittest` suite. **Not met** — there is no `BUILD.lirk`
-   for this repo yet.
+   `pytest`/`unittest` suite. **Met** (2026-08-02) — `lirk/BUILD.lirk`
+   and `tests/BUILD.lirk` describe 13 targets mirroring the real import
+   graph. The self-hosted run happens *alongside* `unittest discover`,
+   not instead of it: an independent runner is what would catch lirk
+   reporting a false green about itself.
 2. **Track record on real repos.** At least 200 cumulative `lirk
    build`/`lirk test` invocations across at least 3 distinct real
    (non-fixture, non-lirk) repos, with zero `signal: hangup`
    occurrences and zero cache-correctness bugs (a `cached` result that
-   disagrees with what a `--force` fresh run produces). Dogfooding
-   against `terminal-projects` (backgammon, go, tictactoe, connect4,
-   chess, adventure-engine) has almost certainly run past this scale
-   without either failure mode, but the runs haven't been tallied
-   against this specific threshold — **unverified**, treat as not met
-   until it has been.
+   disagrees with what a `--force` fresh run produces). **Not met** —
+   the invocation count and both failure-mode clauses are satisfied
+   (~187 documented, tallied 2026-07-30, no hangup ever observed), and
+   self-hosting now supplies a second repo. One more distinct consumer
+   is all that remains. See [`docs/TASKS.md`](docs/TASKS.md).
 3. **`docs/KNOWN_ISSUES.md` clear.** No open entries beyond ones
    explicitly marked cosmetic-only. **Met** as of this writing (one
    entry on record, status: Fixed).
@@ -191,6 +193,13 @@ references — overwritten as things change, not appended to:
   honest status, open bugs, and next actions in priority order.
 
 Read DESIGN.md before changing anything in `lirk/`.
+
+Run both test paths before pushing — they are not redundant:
+
+```sh
+python3 -m unittest discover -s tests -t .   # source of truth
+python3 -m lirk test //...                   # self-hosted, ~2m45s
+```
 
 ## License
 

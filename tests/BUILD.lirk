@@ -1,0 +1,58 @@
+# lirk's own test suite, as lirk targets.
+#
+# Each test target depends on exactly the lirk modules its module
+# imports, not on //lirk:cli wholesale -- the point of self-hosting is
+# to exercise a real dependency topology, and collapsing it to one edge
+# would test nothing about dep propagation.
+#
+# Every target that reads tests/fixtures declares it as `data`, so
+# editing, adding, or removing a fixture invalidates that target's
+# cached result. Without it a fixture edit leaves the test `cached` and
+# reports a stale PASS.
+#
+# fixtures/ is also in .lirk-root's ignore list, which is a separate
+# concern: ignore governs the BUILD.lirk *scan*, data governs
+# fingerprinting. A directory can be both -- not our targets, but
+# still our inputs.
+#
+# test_targets is the one module that builds its inputs with tempfile
+# rather than reading fixtures, so it declares no data.
+
+[[target]]
+name = "init"
+type = "library"
+srcs = ["__init__.py"]
+
+[[target]]
+name = "test_targets"
+type = "test"
+srcs = ["test_targets.py"]
+deps = [":init", "//lirk:targets"]
+
+[[target]]
+name = "test_graph"
+type = "test"
+srcs = ["test_graph.py"]
+deps = [":init", "//lirk:graph"]
+data = ["fixtures"]
+
+[[target]]
+name = "test_cache"
+type = "test"
+srcs = ["test_cache.py"]
+deps = [":init", "//lirk:cache", "//lirk:graph"]
+data = ["fixtures"]
+
+[[target]]
+name = "test_actions"
+type = "test"
+srcs = ["test_actions.py"]
+deps = [":init", "//lirk:actions", "//lirk:graph", "//lirk:targets"]
+data = ["fixtures"]
+
+[[target]]
+name = "test_cli"
+type = "test"
+srcs = ["test_cli.py"]
+deps = [":init", "//lirk:cli"]
+data = ["fixtures"]
