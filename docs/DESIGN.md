@@ -280,8 +280,15 @@ Consequences worth stating explicitly:
   category of stale-build bug avoided by construction.
 
 **Writes are atomic and incremental.** `save_cache` writes a sibling
-`.tmp` and `os.replace()`s it, so an interrupted write cannot leave a
-truncated file. `_execute` saves after *every* successful target, not
+`.<pid>.tmp` and `os.replace()`s it, so an interrupted write cannot
+leave a truncated file. The PID is in the name so two concurrent runs
+cannot write the same temp path and replace each other's half-written
+file. That does not make concurrent runs safe — load/save is an
+unlocked read-modify-write, so overlapping runs can still lose one
+run's entries — but a lost entry costs a redundant rebuild, whereas a
+torn temp file is a corrupt cache. Locking properly would mean a lock
+file, whose stale-after-crash failure mode is a poor trade on a device
+that crashes. `_execute` saves after *every* successful target, not
 once at the end — on a device that has crashed mid-session before,
 losing a completed 60s run to a Ctrl-C is the same category of problem
 the project's doc discipline exists to avoid. Every per-target `print`
@@ -344,11 +351,20 @@ subprocess.run(
   kills only the direct child, so a `main_test.py` that spawned its own
   `main.py` can leave that grandchild running. Killing the tree needs a
   process group. A partially-cleaned timeout beats an unbounded hang.
-- **Every src runs even after an earlier one fails.** Failures
-  accumulate into `N of M src files failed: ...`. Stopping at the first
-  failure was invisible while every target had one src; with multi-src
-  targets a failing `test_moves.py` would hide `test_castling.py`
-  entirely.
+- **Every src runs even after an earlier one fails** — *including*
+  after one times out. Failures accumulate into
+  `N of M src files failed: ...`. Stopping at the first failure was
+  invisible while every target had one src; with multi-src targets a
+  failing `test_moves.py` would hide `test_castling.py` entirely. The
+  timeout path returned early for exactly this reason until it was
+  fixed: a hung test often does mean the whole target is wedged, but
+  that is a guess, and guessing costs every later src's result.
+- **A module that runs zero tests fails.** `unittest` exits 5
+  (`NO TESTS RAN`) on 3.12+ but 0 on 3.11, which `pyproject.toml` still
+  supports, so an exit-code-only check reports a false PASS for a file
+  that tests nothing. lirk keys off the `Ran 0 tests` summary line,
+  written on every version, and checks it independently of the exit
+  code so the reason is named on 3.12 too.
 
 **Test output is passed through raw**, unsummarized and unreformatted.
 Two independent assessments identified this as a practical strength.
@@ -438,10 +454,15 @@ Tests are plain `unittest`, run with
 | `rootimport_repo` | Root-relative `from pkg.thing import ...` — the PYTHONPATH regression |
 | `multisrc_repo` | Multi-src library and test targets; later failures not hidden by earlier ones |
 | `data_dep_repo` | `data` field: fingerprinted, not syntax-checked |
-| `hang_repo` | Test timeout path |
+| `datadir_repo` | `data` naming a directory: recursive fingerprint, add/remove detection, `__pycache__` exclusion |
+| `hang_repo` | Test timeout path, and that a timeout doesn't abandon later srcs |
+| `no_tests_repo` | A test module defining no tests fails rather than passing |
 | `stdin_repo` | Child does not inherit lirk's stdin |
+| `subdir_test_repo`, `stem_collision_repo` | Test srcs in package subdirectories; same-stem srcs don't collide |
+| `ignore_repo` | `.lirk-root`'s `ignore` list, covering the named directory and its subtree |
 | `failing_test_repo`, `failed_dep_repo` | Failing test vs. failing library with a dependent (SKIP propagation) |
 | `syntax_error_repo`, `missing_src_repo`, `binary_src_repo` | Clean per-target failures instead of tracebacks |
+| `missing_src_partial_repo` | A missing src fails only its own target, not the whole run |
 
 The suite spawns real interpreters rather than mocking, which is why
 it costs ~60s+ on the target device. That is the accepted tradeoff.

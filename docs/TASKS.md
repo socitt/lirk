@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source: 110 tests, `python3 -m unittest discover
+Last verified against source: 112 tests, `python3 -m unittest discover
 -s tests -t .`. lirk also builds and tests itself — `lirk build //...`
 (13 targets) and `lirk test //...` (5 test targets) — which runs
 alongside the unittest invocation rather than replacing it. Both must
@@ -32,7 +32,7 @@ only via a separately maintained `unittest` suite.
 **Status:** `lirk/BUILD.lirk` and `tests/BUILD.lirk` describe 13
 targets whose deps mirror the real import graph. `lirk build //...`
 builds 13/13; `lirk test //...` runs the suite through lirk, 5/5 test
-targets green (all 110 underlying tests) in ~2m45s.
+targets green (all 112 underlying tests) in ~2m45s.
 
 Decisions made when this landed:
 
@@ -128,52 +128,23 @@ Nothing. M1 and M2 are closed — see Recently closed.
 
 ### LOW
 
-**L1 — A test module containing zero tests can report PASS on
-Python 3.11.** `python3 -m unittest <module>` exits 5 (`NO TESTS RAN`)
-on 3.12+, so lirk correctly reports `FAIL ... (exit 5)`. That exit code
-was introduced in 3.12; on 3.11 the same case exits 0 and lirk reports
-a false PASS. `pyproject.toml` declares `requires-python = ">=3.11"`,
-so 3.11 is a supported runtime.
+**L3 (partial) — concurrent invocations can still lose cache entries.**
+The torn-temp-file half is fixed (the temp filename now carries the
+PID). `load_cache`/`save_cache` remain an unlocked read-modify-write,
+so two overlapping runs can still lose one run's entries.
 
-*Fix direction:* either raise the floor to 3.12 (cheapest, if nothing
-depends on 3.11), or detect the zero-tests case from the subprocess
-output. Bump `ACTION_VERSION` if the latter.
+Deliberately left: the failure mode is a redundant rebuild, never a
+wrong result, and the single-device workflow makes overlap unlikely.
+Fixing it properly means a lock file, which is real complexity and a
+new failure mode of its own (a stale lock after a crash — and iSH-AOK
+crashing is the environment this tool exists for). Not worth it unless
+concurrent runs actually become a workflow.
 
-**L2 — A timeout abandons the remaining srcs of a multi-src test
-target.** `run_test` accumulates failures across all srcs, but the
-`TimeoutExpired` handler `return`s immediately — so one hung src hides
-every src after it, the exact asymmetry the accumulate-failures change
-was meant to remove.
-
-*Fix direction:* record the timeout in `failed_modules` and continue
-the loop. Cheap; the only argument against is that a hung test often
-means the whole target is wedged. Bump `ACTION_VERSION`.
-
-**L3 — Concurrent invocations clobber the cache.** `load_cache` /
-`save_cache` are an unlocked read-modify-write, and both runs write the
-same `.lirk-cache.json.tmp` path before `os.replace`. Two overlapping
-runs lose one run's entries, and could in principle replace a
-partially-written temp file.
-
-Failure mode is a redundant rebuild, not a wrong result, and the
-single-device workflow makes overlap unlikely. *Fix direction, if ever
-worth it:* include the PID in the temp filename (one line, removes the
-worse half of the problem) and leave the lost-entries half alone.
-
-**L5 — `needs_build`'s first parameter is named `label` but receives a
-cache key** (`"<mode>:<label>"`). Cosmetic; misleading when reading
-`cache.py` cold.
+*Everything else on this list is closed — see Recently closed.*
 
 ---
 
 ## Documentation gaps
-
-**D1 — `docs/index.md` is stale.** The published Pages overview still
-carries the vague "until serial execution is proven stable" and "Not
-yet self-hosting" language that the README replaced with the explicit
-v1 criteria above. It also has no Installation section and doesn't
-mention the `data` field. It should point at the criteria rather than
-restate a softer version of them.
 
 **D2 — Link the filed iSH-AOK issue from `KNOWN_ISSUES.md`.** The
 upstream JVM-crash report has been submitted, and the local draft was
@@ -186,16 +157,40 @@ status. *What's left:* paste the issue link in.
 ## Next actions, in priority order
 
 1. **Find a third consumer repo.** The single thing standing between
-   v1 and all three criteria being met. Criteria 1 and 3 are met and
+   v1 and all three criteria being met, and now the *only* open item
+   that is not blocked on external input. Criteria 1 and 3 are met and
    criterion 2 needs only this.
-2. **D1** — `docs/index.md` now contradicts reality twice over: it
-   still says "Not yet self-hosting", and it predates both `.lirk-root`
-   config and `data` directories. Bumped in priority accordingly.
-3. **D2**, whenever convenient — one look at the live site.
-4. LOW items opportunistically; none block anything.
+2. **D2**, whenever convenient — needs the upstream issue URL, which is
+   not derivable from the repo.
+
+Nothing else is open. The LOW backlog is cleared apart from the half of
+L3 deliberately left (see above).
 
 ## Recently closed
 
+- **L1 — a test module with zero tests now fails** (2026-08-02).
+  Detected from the `Ran 0 tests` summary line, which `unittest` writes
+  on every version, rather than by raising the Python floor to 3.12.
+  That keeps 3.11 supported (as `pyproject.toml` promises) and is the
+  more robust signal. Checked independently of the exit code rather
+  than as a fallback for a zero one, so the failure message names the
+  reason on 3.12 too — there the exit code already caught it but
+  reported only `1 of 1 src files failed`. Fixture: `no_tests_repo`.
+- **L2 — a timeout no longer abandons the remaining srcs**
+  (2026-08-02). `TimeoutExpired` records the module and continues
+  instead of returning, so one hung src no longer hides every src after
+  it. The fixture pairs the hanging src with a deliberately *failing*
+  one, since a passing one could not distinguish "ran" from "skipped".
+- **L5 — `needs_build`'s parameter renamed** `label` → `cache_key`
+  (2026-08-02), with a docstring saying what it actually receives.
+- L1 and L2 together bumped `ACTION_VERSION` 7 → 8: both change what a
+  passing test means, so prior green results must not be trusted from
+  cache.
+- **D1 — `docs/index.md` refreshed** (2026-08-02). Replaced the "Not
+  yet self-hosting" status with the three v1 criteria and their honest
+  state, added an Installation section, and documented `data` and
+  `.lirk-root`'s `ignore` list, neither of which the page had ever
+  mentioned.
 - **Criterion 1: lirk is self-hosting** (2026-08-02). See the criterion
   above for the shape and the decisions. `lirk test //...` runs
   alongside `unittest discover`, not instead of it.

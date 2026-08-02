@@ -37,11 +37,15 @@ has the originals.
   from LOW — the graph would not load at all), `data` directories, and
   the stale-PASS those two jointly fixed. Details in TASKS.md
   "Recently closed"; behavior is written up in DESIGN.md §2 and §4.
-- **Next:** find a third consumer repo. That is now the *only* thing
-  between the project and all three v1 criteria. After that, D1 —
-  `docs/index.md` is doubly stale now, still claiming "not yet
-  self-hosting" and predating both `.lirk-root` config and `data`
-  directories.
+- **Cleared the rest of the backlog** — everything that did not depend
+  on having a third repo. L1 (zero-test modules reported PASS on 3.11),
+  L2 (a timeout abandoned later srcs), L5 (misnamed parameter), the
+  torn-temp-file half of L3, and D1 (`docs/index.md` rewritten against
+  the real v1 criteria, plus Installation, `data`, and `ignore`).
+  `ACTION_VERSION` 7 → 8 for L1+L2. Suite 110 → 112.
+- **Next, and the only things left:** find a third consumer repo
+  (blocks criterion 2, and therefore v1), and D2 (needs the upstream
+  iSH-AOK issue URL). Both need input that isn't in the repo.
 
 ## 2026-07-30
 
