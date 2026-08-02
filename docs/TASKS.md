@@ -159,7 +159,10 @@ status. *What's left:* paste the issue link in.
 1. **Find a third consumer repo.** The single thing standing between
    v1 and all three criteria being met, and now the *only* open item
    that is not blocked on external input. Criteria 1 and 3 are met and
-   criterion 2 needs only this.
+   criterion 2 needs only this. `docs/getting-started.md` now exists to
+   hand to whoever takes it on, including a closing section telling
+   them what to record for this criterion (invocation count, any
+   hangup, any `cached` vs `--force` disagreement).
 2. **D2**, whenever convenient — needs the upstream issue URL, which is
    not derivable from the repo.
 
@@ -168,6 +171,18 @@ L3 deliberately left (see above).
 
 ## Recently closed
 
+- **D3 — onboarding guide written** (2026-08-02).
+  `docs/getting-started.md`: a worked two-package example with real
+  captured output, converting an existing repo, a full CLI/label
+  reference, an output-and-exit-code key, and troubleshooting keyed to
+  actual error strings. The gap it closes: the docs were complete as
+  *reference* (`build-format.md`) and *rationale* (DESIGN.md) but had
+  no path a stranger could follow, and several facts a new consumer
+  needs most — `--force`, the `cwd`+`PYTHONPATH` import model, that
+  `//...` is the only wildcard — existed only in DESIGN.md or in
+  `cli.py`. Written while actually building the example repo, which is
+  how the module-shadowing trap (a module named the same as its own
+  package directory) got found and documented.
 - **L1 — a test module with zero tests now fails** (2026-08-02).
   Detected from the `Ran 0 tests` summary line, which `unittest` writes
   on every version, rather than by raising the Python floor to 3.12.

@@ -121,6 +121,12 @@ reliably before expanding scope.
 
 ## Using lirk in a repo
 
+**[docs/getting-started.md](docs/getting-started.md) is the full
+walkthrough** — a worked two-package example with real output, how to
+convert an existing repo (including the import model, which is where
+real repos stumble), the complete command reference, and
+troubleshooting keyed to actual error messages. The essentials:
+
 A repo with `BUILD.lirk` files should gitignore the artifacts lirk
 generates alongside your source:
 

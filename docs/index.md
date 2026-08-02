@@ -56,6 +56,11 @@ pip install -e .
 
 ## Quick start
 
+New to lirk, or adopting it in an existing repo? The
+[getting started guide](getting-started.html) walks the whole thing
+end to end — a worked two-package example with real output, the import
+model, a command reference, and troubleshooting. The short version:
+
 ```sh
 # at your repo root
 touch .lirk-root
