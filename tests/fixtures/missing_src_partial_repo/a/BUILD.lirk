@@ -1,0 +1,4 @@
+[[target]]
+name = "a_lib"
+type = "library"
+srcs = ["missing.py"]

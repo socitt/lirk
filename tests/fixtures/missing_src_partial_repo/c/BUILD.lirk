@@ -1,0 +1,5 @@
+[[target]]
+name = "c_lib"
+type = "library"
+srcs = ["c.py"]
+deps = ["//a:a_lib"]

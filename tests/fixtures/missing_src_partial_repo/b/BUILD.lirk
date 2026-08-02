@@ -1,0 +1,4 @@
+[[target]]
+name = "b_lib"
+type = "library"
+srcs = ["b.py"]

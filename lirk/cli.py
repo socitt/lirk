@@ -100,12 +100,19 @@ def _execute(
     # anything: compute_fingerprints reads file contents unconditionally,
     # so a missing file reached from there would otherwise surface as an
     # unguarded traceback instead of the clean per-target failure below.
+    #
+    # A target with missing files is marked failed rather than aborting
+    # the whole run -- a stale filename in one package must not stop
+    # every unrelated target in the repo. Its dependents are skipped by
+    # the same dep_failure branch that handles an execution failure.
+    failed: set[str] = set()
     for label in order:
         target = graph.targets[label]
         missing = missing_files(target, root)
         if not missing:
             continue
         ok = False
+        failed.add(label)
         summary.failed += 1
         if mode == "test" and target.type == "test":
             summary.tests_failed += 1
@@ -113,22 +120,33 @@ def _execute(
             f"  FAIL   {label}: missing source file(s): {', '.join(missing)}",
             flush=True,
         )
-    if not ok:
-        return ok, summary
+
+    # compute_fingerprints reads every dependency's fingerprint, so a
+    # target is only fingerprintable if its whole dependency closure is.
+    # `order` is topological, so one forward pass propagates exclusion to
+    # every transitive dependent.
+    excluded = set(failed)
+    for label in order:
+        if label not in excluded and any(d in excluded for d in graph.edges[label]):
+            excluded.add(label)
 
     try:
-        fingerprints = compute_fingerprints(graph, root, order)
+        fingerprints = compute_fingerprints(
+            graph, root, [l for l in order if l not in excluded]
+        )
     except CacheError as e:
         print(f"lirk: {e}", file=sys.stderr)
         summary.failed += 1
         return False, summary
 
-    failed: set[str] = set()
     for label in order:
         target = graph.targets[label]
-        fp = fingerprints[label]
         cache_key = f"{mode}:{label}"
         is_test = mode == "test" and target.type == "test"
+
+        if label in failed:
+            # A preflight missing-file failure, already reported above.
+            continue
 
         dep_failure = next((d for d in graph.edges[label] if d in failed), None)
         if dep_failure is not None:
@@ -139,6 +157,8 @@ def _execute(
                 summary.tests_skipped += 1
             print(f"  SKIP   {label}: dependency {dep_failure} failed", flush=True)
             continue
+
+        fp = fingerprints[label]
 
         if not force and not needs_build(cache_key, fp, cache):
             print(f"  cached  {label}", flush=True)

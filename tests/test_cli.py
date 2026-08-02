@@ -322,6 +322,38 @@ class MissingOrUnreadableSourceCliTests(unittest.TestCase):
         self.assertIn("missing.py", out)
         self.assertNotIn("Traceback", out)
 
+    def test_one_missing_source_file_does_not_abort_unrelated_targets(self):
+        # //a:a_lib has a missing src, //c:c_lib depends on it, //b:b_lib
+        # is unrelated. The missing file must not stop //b from building.
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "missing_src_partial_repo", root)
+
+        code, out = _run(["build", "//..."], root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL   //a:a_lib", out)
+        self.assertIn("missing.py", out)
+        self.assertIn("built  //b:b_lib", out)
+        self.assertIn("SKIP   //c:c_lib", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_unrelated_target_is_cached_after_a_missing_file_run(self):
+        # The successful half of a partially-failing run must still reach
+        # the cache, so a re-run reports it as cached rather than redoing it.
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "missing_src_partial_repo", root)
+
+        _run(["build", "//..."], root)
+        code, out = _run(["build", "//..."], root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("cached  //b:b_lib", out)
+        self.assertIn("FAIL   //a:a_lib", out)
+
     def test_binary_source_file_is_a_clean_failure(self):
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
