@@ -9,11 +9,11 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source: 112 tests, `python3 -m unittest discover
--s tests -t .`. lirk also builds and tests itself — `lirk build //...`
-(13 targets) and `lirk test //...` (5 test targets) — which runs
-alongside the unittest invocation rather than replacing it. Both must
-be green.
+Last verified against source (2026-08-03): 127 tests, `python3 -m
+unittest discover -s tests -t .`. lirk also builds and tests itself —
+`lirk build //...` (13 targets) and `lirk test //...` (5 test targets)
+— which runs alongside the unittest invocation rather than replacing
+it. Both must be green.
 
 ---
 
@@ -53,7 +53,7 @@ by actually attempting it — see Recently closed for L4 (the fixture
 scan), the `data` directory support, and the stale-PASS they jointly
 fixed.
 
-### 2. Track record on real repos — ❌ NOT MET (blocked on the repo-count clause, not the invocation count)
+### 2. Track record on real repos — ✅ MET (2026-08-03)
 
 At least 200 cumulative `lirk build`/`lirk test` invocations across at
 least 3 distinct real (non-fixture, non-lirk) repos, with **zero**
@@ -80,11 +80,34 @@ The true total is comfortably past 200 once uncounted build
 invocations are included — the two failure-mode sub-clauses are
 effectively satisfied.
 
-**The blocker is the "3 distinct repos" clause.** The documented
+**The "3 distinct repos" clause is now satisfied.** The tallied
 invocations above are all against a single consumer,
-`terminal-projects`, and no amount of additional running against it
-will change that. Self-hosting (criterion 1) now supplies the second
-repo. **One more consumer is what remains.**
+`terminal-projects`. Self-hosting (criterion 1) supplied the second
+repo. **`termrery` is the third** — a curses solar-system orrery, two
+packages and four targets, built under lirk 0.1.0 from its first
+commit. Its write-up is `docs/lirk-notes.md` in that repo, and every
+finding in it was re-reproduced against current lirk source on
+2026-08-03 before being recorded below.
+
+Honest caveats on this one:
+
+- **termrery did not tally its invocations.** The session is described
+  as "a lot of small edits" with caching "consistently right", which is
+  a qualitative report, not a count. The ~187 floor above is unchanged
+  by it; what termrery supplies is the third *repo*, which is what was
+  actually blocking.
+- **No `signal: hangup`, and none has ever been observed** in any repo,
+  in any session, to date.
+- **The zero-cache-bug sub-clause survives, but it needed a ruling**:
+  an undeclared dependency produced a `cached` PASS that `--force`
+  turned into a FAIL — a configuration gap rather than an engine
+  defect, exactly as the fixture-`data` case was, and it never escaped
+  into a wrong answer about lirk's own correctness. Two of these,
+  though, both found the moment a new repo was added, was the argument
+  that "configuration gap" was carrying more weight than it should.
+  **The engine now detects it** (H1, closed 2026-08-03), which is the
+  better answer than continuing to rule on it. H2 is the remaining
+  member of the family.
 
 Worth recording honestly: self-hosting immediately produced a
 cache-correctness bug of exactly the shape this criterion forbids — a
@@ -94,14 +117,25 @@ second repo was supposed to generate. It was a configuration gap
 made the engine able to express the dependency at all. It is fixed and
 covered by tests; the criterion's zero-count is intact because the bug
 never escaped into a real consumer's usage. But it is the clearest
-possible argument for why the third repo matters.
+possible argument for why the third repo matters — and the third repo
+then produced a second bug of exactly the same family (H1), which
+settles the argument.
 
 **Decided 2026-08-02: self-hosting counts as the second repo.** lirk
 building itself is a genuinely different shape from a games monorepo —
 different dependency topology, different test style — so it exercises
 the overfitting risk the clause was written to guard against. This
 makes criterion 1 a prerequisite for criterion 2 rather than an
-independent item, and leaves **one more consumer to find**.
+independent item.
+
+**What the third repo bought, which is the whole point of the clause:**
+six backlog items — H1, M3, M4, M5, M6 and L6 below — most of which no
+amount of further running against `terminal-projects` or lirk itself
+would have produced, because both of those repos declare their deps
+correctly, both keep their `.lirk-root` in place, and neither has an
+entry point. The pattern from self-hosting repeated exactly: a new
+consumer finds gaps by *being shaped differently*, not by adding
+invocations.
 
 ### 3. KNOWN_ISSUES.md clear — ✅ MET
 
@@ -118,13 +152,120 @@ defect. Recheck this whenever an entry is added.
 Ordered by priority. Everything here was verified against current
 source; nothing is carried forward from resolved historical reports.
 
+H1, M3–M6 and L6 all came from the termrery trial (2026-08-03) and were
+reproduced against current source before being written here; the repros
+are given inline so no one has to take the source repo's word for it.
+
 ### HIGH
 
-Nothing. No known silent-wrong-pass path is currently open.
+**H2 — a `.py` file no target declares is an unfingerprinted input.**
+H1 closed the case where the imported file belongs to an *undeclared
+target*. This is the remaining half: a file under the repo that no
+target lists in `srcs` at all. Nothing fingerprints it, so editing it
+invalidates nothing, and the import check deliberately stays silent
+(rejecting it would fail ordinary repos — an undeclared package
+`__init__.py` is extremely common, including in lirk's own fixtures).
+
+Reproduced against current source, with the import check in place:
+
+```
+$ lirk test //leaf:orphan_test      # imports orphan.thing; no target declares orphan/thing.py
+  PASS   //leaf:orphan_test
+$ vi orphan/thing.py                # change the value the test asserts on
+$ lirk test //leaf:orphan_test
+  cached  //leaf:orphan_test
+lirk: 1/1 tests passed              # <-- wrong
+$ lirk test //leaf:orphan_test --force
+lirk: 0/1 tests passed
+```
+
+Same severity as H1 and the same failure shape; what differs is the
+fix. Rejecting the import is not available, so the options are to fold
+the resolved file's contents into the importing target's fingerprint as
+an implicit input (correct, silent, and makes the graph partly
+implicit), or to require every imported repo file to be declared
+somewhere (explicit, and a much harder adoption story). Undecided, and
+worth deciding before it's implemented.
+
+Narrower than H1 in practice — it needs a file outside every target,
+where H1 needed only a missing `deps` line — but it is not rare: an
+`__init__.py` that no BUILD file mentions is the ordinary case, and
+editing one currently invalidates nothing that imports it.
 
 ### MEDIUM
 
-Nothing. M1 and M2 are closed — see Recently closed.
+M1 and M2 are closed — see Recently closed.
+
+**M3 — `srcs` accepts non-`.py` files, and only catches them by
+accident.** Nothing checks the extension; a src is rejected only if its
+contents fail `ast.parse`. Whether a text file is caught therefore
+depends on what it says:
+
+```
+srcs = ["notes.txt"]     # "a rough note about the module" -> FAIL, syntax error
+srcs = ["oneword.txt"]   # "hello"                         -> built, OK
+```
+
+DESIGN.md §2 states flatly that "a `.txt` fixture in `srcs` produces a
+bogus syntax error"; that is true only for contents that don't happen
+to parse. A one-word file, an empty file, or anything else Python
+accepts sails through into `srcs`, where every consumer assumes it is
+importable. Rejecting non-`.py` in `srcs` by extension makes the
+`srcs`/`data` split self-teaching — termrery's point was that the
+distinction exists but nothing steers you toward it — and makes
+DESIGN.md's claim true as written.
+
+**M4 — the root fallback to cwd is silent, and label errors don't say
+what the root was.** Documented behavior is "nearest ancestor
+containing `.lirk-root`, else cwd itself" (`_discover_root`). When the
+marker is missing the fallback is invisible, so `//` silently changes
+meaning depending on which directory you're standing in. From the repo
+root everything looks fine; from a package subdirectory that package
+becomes the root, and you get an error about a dependency:
+
+```
+$ cd cli && lirk build //...        # marker deleted
+lirk: //:cli: dependency '//orrery:orrery' does not exist
+```
+
+The message points at the dep. The actual fault is that the root became
+`cli/`, which nothing on screen says. termrery notes this bit an
+earlier attempt at that project badly enough that creating `.lirk-root`
+is now the first instruction in its README. Two cheap fixes, both
+worth doing: say which directory was chosen as the root and why when
+falling back to cwd, and name the root in the error when a `//` label
+fails to resolve.
+
+**M5 — an entry point can be dead and every lirk command stays
+green.** `lirk run` and a `binary` type are a settled decision (DESIGN
+§6: "the need is fully met by `test` targets that subprocess the
+entrypoint"), and this entry does **not** re-open it. What termrery
+supplies is evidence about the *documented alternative*: nobody wrote
+that test target, because nothing in the docs says to. Their `main()`
+was defined and never called, so `python3 -m cli.render` did nothing at
+all while `lirk build //...` reported OK throughout — the application
+the repo exists to produce was the one artifact lirk had no opinion
+about.
+
+The settled decision holds only if the pattern that replaces it is
+discoverable, and right now it isn't documented anywhere. *What's
+left:* a worked entrypoint-as-`test`-target example in
+`getting-started.md` — a `test` target whose src subprocesses the real
+entry point and asserts it starts, exits, and prints something. See D4.
+
+**M6 — a failing run prints no list of what failed.** `_execute` prints
+per-target lines as it goes and then a counts-only summary (`lirk: 0/1
+tests passed`). Test output goes through unmodified, which is correct
+and is a settled decision (§6, no summarizing layer) — but with a few
+packages the failing target's own line scrolls off above the unittest
+dump, and the summary that survives on screen says only how many
+failed, not which. On a phone terminal that means scrolling back
+through a full traceback to recover a label you already saw.
+
+A trailing list of failed labels is not a summarizing layer over test
+output — it restates labels lirk already printed, and touches nothing
+about the captured stdout/stderr. Cheap: `_execute` already has
+`failed`.
 
 ### LOW
 
@@ -140,11 +281,41 @@ new failure mode of its own (a stale lock after a crash — and iSH-AOK
 crashing is the environment this tool exists for). Not worth it unless
 concurrent runs actually become a workflow.
 
+**L6 — `lirk --version` isn't a flag.** `main`'s parser requires a
+subcommand, so `lirk --version` errors with the subcommand usage and
+`pip show lirk` is the workaround. One `parser.add_argument("--version",
+action="version", ...)` against the installed distribution version.
+Raised by termrery; trivial, and the first thing anyone reports a bug
+against.
+
 *Everything else on this list is closed — see Recently closed.*
+
+### Raised by termrery, already settled — not backlog
+
+Recorded so they aren't re-derived from the review as if they were new:
+
+- **A `binary` target type and `lirk run`** (their #2). Off the roadmap
+  per DESIGN §6. The real cost they hit is M5 above, which is a docs
+  gap in the replacement pattern, not a missing feature.
+- **`lirk query` / any way to list targets** (their #5 — "`grep -r
+  '^name' */BUILD.lirk` is the current answer"). Deferred on evidence
+  in §6, most recently at ~26 targets; termrery has four, so it is no
+  new evidence against that. Worth revisiting only if a consumer
+  arrives with a target count where grep genuinely stops working.
 
 ---
 
 ## Documentation gaps
+
+**D4 — Document the entrypoint-as-`test`-target pattern.** The
+counterpart to M5: DESIGN §6 rules out `lirk run` on the grounds that a
+`test` target subprocessing the entry point covers it, and no document
+shows how. `getting-started.md` should carry a worked example —
+`subprocess.run([sys.executable, "-m", "cli.render", "--selftest"])`,
+or equivalent — asserting the entry point starts, exits 0, and produces
+output. That is what would have caught termrery's never-called
+`main()`. Small, and it is what makes a settled decision defensible
+rather than merely recorded.
 
 **D2 — Link the filed iSH-AOK issue from `KNOWN_ISSUES.md`.** The
 upstream JVM-crash report has been submitted, and the local draft was
@@ -156,21 +327,78 @@ status. *What's left:* paste the issue link in.
 
 ## Next actions, in priority order
 
-1. **Find a third consumer repo.** The single thing standing between
-   v1 and all three criteria being met, and now the *only* open item
-   that is not blocked on external input. Criteria 1 and 3 are met and
-   criterion 2 needs only this. `docs/getting-started.md` now exists to
-   hand to whoever takes it on, including a closing section telling
-   them what to record for this criterion (invocation count, any
-   hangup, any `cached` vs `--force` disagreement).
-2. **D2**, whenever convenient — needs the upstream issue URL, which is
+**All three v1 criteria hold, and v1 is to be tagged once the
+high-priority correctness work is done** (decided 2026-08-03: fix
+first, tag after — tagging v1 with a known silent-wrong-pass path open
+is the thing the criteria exist to prevent). H1 is closed; **H2 is what
+now stands between here and the tag.**
+
+1. **H2 — undeclared files as unfingerprinted inputs.** The last known
+   stale-PASS path. Needs its fix chosen first: implicit fingerprinting
+   of imported-but-undeclared files, or requiring them to be declared.
+   Unlike H1, rejecting is not an option.
+2. **M4 — name the root.** Two small, independent changes (announce the
+   cwd fallback; put the root in unresolved-`//`-label errors) against
+   a failure that has now confused two separate projects.
+3. **M3 — reject non-`.py` in `srcs`.** Small, and makes DESIGN §2's
+   existing claim true as written.
+4. **M6** and **L6**, both trivial. **D4** alongside whichever of these
+   gets picked up, since it's a docs edit rather than an engine change.
+5. **M5** is D4 — no engine work.
+6. **D2**, whenever convenient — needs the upstream issue URL, which is
    not derivable from the repo.
 
-Nothing else is open. The LOW backlog is cleared apart from the half of
-L3 deliberately left (see above).
+Apart from the half of L3 deliberately left (see above), everything
+open came out of the termrery trial or the H1 work it prompted.
 
 ## Recently closed
 
+- **H1 — `deps` is now checked against real imports** (2026-08-03).
+  After every src parses, the `Import`/`ImportFrom` nodes of the trees
+  `validate_target` already built are walked, each module resolved the
+  way the runner resolves it (package dir, then repo root), and the
+  target FAILs if a resolved file belongs to a target outside its
+  transitive dep closure:
+
+  ```
+    FAIL   //cli:cli: render.py imports 'orrery.camera' (//orrery:orrery), not in deps
+  ```
+
+  **FAIL, not warn** — decided deliberately: a warning leaves the
+  stale-PASS path open, which was the entire reason the item was HIGH.
+  `ACTION_VERSION` 8 → 9, since a prior green was computed under rules
+  that permitted this.
+
+  Decisions inside it, all written up in DESIGN §3: checked against the
+  transitive closure rather than direct deps (the closure is what the
+  fingerprint covers; direct-only is hygiene, buys no correctness here,
+  and would reject lirk's own BUILD files); a file no target declares
+  is not reported (that's H2, and a different fix); resolution mirrors
+  the runner rather than using `importlib`, so nothing is imported to
+  find out; the AST is reused rather than re-parsed. `ImportEnv` is
+  assembled by `cli.py` and passed down, so `actions.py` still doesn't
+  import the graph layer.
+
+  **Adoption cost turned out to be zero.** Run against all three real
+  repos before landing: lirk itself (13 targets), `terminal-projects`
+  (66), and `termrery` (4) all build clean — 83 targets, no false
+  positives. termrery's own BUILD files were correct; the violation in
+  their review was staged in a throwaway copy.
+
+  Fixture: `import_repo`, which pairs `undeclared.py` and `declared.py`
+  — the same import, differing only in the BUILD file, so a check that
+  rejected everything couldn't look correct. Suite 112 → 127.
+- **Criterion 2: the third repo is `termrery`** (2026-08-03). Two
+  packages, four targets, a curses application; built under lirk from
+  its first commit rather than converted afterwards. Its review lives
+  at `docs/lirk-notes.md` in that repo and is the source of H1 and
+  M3–M6. Every claim in it was re-reproduced against current lirk
+  source before being recorded, and one turned out to be worse than
+  reported: their "deps are documentation, not enforced" is also a
+  stale-PASS mechanism, since an undeclared edge is absent from the
+  fingerprint (H1). The trial cost nothing in engine changes and
+  returned five findings, four of which neither existing repo could
+  have produced.
 - **D3 — onboarding guide written** (2026-08-02).
   `docs/getting-started.md`: a worked two-package example with real
   captured output, converting an existing repo, a full CLI/label

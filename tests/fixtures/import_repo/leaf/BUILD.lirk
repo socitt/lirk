@@ -1,0 +1,41 @@
+[[target]]
+name = "transitive"
+type = "library"
+srcs = ["transitive.py"]
+deps = ["//mid:mid"]
+
+[[target]]
+name = "undeclared"
+type = "library"
+srcs = ["undeclared.py"]
+
+[[target]]
+name = "declared"
+type = "library"
+srcs = ["declared.py"]
+deps = ["//base:base"]
+
+[[target]]
+name = "helper"
+type = "library"
+srcs = ["helper.py"]
+
+[[target]]
+name = "sibling"
+type = "library"
+srcs = ["sibling.py"]
+
+[[target]]
+name = "selfrel"
+type = "library"
+srcs = ["selfrel.py", "selfmod.py"]
+
+[[target]]
+name = "orphan_user"
+type = "library"
+srcs = ["orphan_user.py"]
+
+[[target]]
+name = "undeclared_test"
+type = "test"
+srcs = ["test_undeclared.py"]

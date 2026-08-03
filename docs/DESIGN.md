@@ -188,7 +188,7 @@ flowchart TD
     S -- yes --> K["SKIP, do not cache"]
     S -- no --> G{"fingerprint matches .lirk-cache.json?"}
     G -- yes --> H["skip: report cached"]
-    G -- no --> I["build: srcs exist + ast.parse\ntest: subprocess.run() per src"]
+    G -- no --> I["build: srcs exist + ast.parse\n+ imports within declared closure\ntest: subprocess.run() per src"]
     I -- ok --> J["write entry, save cache atomically"]
     I -- failed --> L["record failure, do not cache"]
 ```
@@ -228,6 +228,53 @@ cached, and produce `1/1 tests passed` directly above `lirk: FAILED`.
 **Only successes are cached.** A pass may be trusted forward; a
 failure must always be retried. This asymmetry is deliberate and
 load-bearing.
+
+### Imports are checked against `deps`
+
+Building a target also fails it if a src imports a module owned by a
+target outside its dependency closure. Added 2026-08-03; it is what
+stops `deps` from being decoration.
+
+The reason it is a correctness check rather than hygiene: targets
+execute with the repo root importable (§5), so Python resolves a
+cross-package import whether or not the edge is declared. An undeclared
+edge is therefore also **missing from the fingerprint** (§4 folds in
+dep fingerprints, and only declared ones), so editing the imported
+package invalidates nothing. The observable result is a `cached` PASS
+that `--force` turns into a FAIL — the same stale-input family as an
+undeclared `data` fixture, found the same way, on the third consumer
+repo.
+
+Four decisions inside it, none of them free:
+
+- **Against the transitive closure, not direct deps only.** The
+  stale-input problem is closed the moment the dependency is folded
+  into the fingerprint, which the closure does. Bazel's stricter
+  "direct deps only" rule buys no additional correctness here and would
+  reject lirk's own BUILD files, which lean on transitive edges
+  deliberately.
+- **A file no target declares is not reported.** It is a real
+  unfingerprinted input and it belongs to the same family, but firing
+  on it would reject ordinary repos — an undeclared package
+  `__init__.py` is common, including in lirk's own fixtures. Tracked
+  separately as TASKS.md H2 — it is the same severity, but the fix is
+  a different one (fingerprint the file, don't reject the import).
+- **Resolution mirrors the runner**, not Python's full import system:
+  the target's package directory (`sys.path[0]` under `cwd=pkg_dir`)
+  then the repo root (`PYTHONPATH`). Anything resolving outside the
+  repo — stdlib, site-packages — is not lirk's business. There is no
+  `importlib` machinery and nothing is imported to find out; it is
+  `ast` plus path existence.
+- **The AST is reused, not re-parsed.** `validate_target` already
+  parses every src for the syntax check, so the import walk rides on
+  the same trees. A second parse would only be a second chance to
+  disagree with the first.
+
+`ImportEnv` (the owner index plus the target's allowed labels) is built
+by `cli.py` and passed in, so `actions.py` still doesn't import the
+graph layer. When it is absent, `validate_target` does the syntax check
+only — that path exists for unit tests, and the CLI always supplies
+one.
 
 ---
 
@@ -273,7 +320,9 @@ Consequences worth stating explicitly:
   forever. This fired silently twice before the constant existed —
   once when `ast.parse` validation was added, once when the test
   subprocess environment changed. **Bump it in the same commit as any
-  change to `validate_target` or `run_test` behavior.** Currently `5`.
+  change to `validate_target` or `run_test` behavior.** Currently `9`
+  — the last bump was the import check, which changes what a passing
+  build means, so caches written before it must not be trusted.
 - **Content hashing, not mtimes.** Immune to `touch`, to fresh
   checkouts, to clock skew, and to iSH-AOK's questionable time
   accounting (observed reporting `user 24m40s` for a 42s run). A whole

@@ -268,6 +268,25 @@ from greeting.greet import greet       # root-relative, any package
 Root-relative is the convention Bazel and Please encourage, and it's
 what makes cross-package imports work at all.
 
+**Every cross-package import must be in `deps`.** lirk checks the two
+against each other and fails the build when they disagree:
+
+```
+  FAIL   //cli:cli: render.py imports 'orrery.camera' (//orrery:orrery), not in deps
+```
+
+Add `//orrery:orrery` to that target's `deps` and it passes. This is
+the one check that costs you something during migration, so it's worth
+knowing why it isn't optional: because the repo root is importable, an
+undeclared import *works* — and because only declared deps are
+fingerprinted, editing the package you forgot to declare invalidates
+nothing. You get a `cached` PASS against changed code. Declaring the
+edge is what makes the cache trustworthy.
+
+A dep-of-a-dep counts, so you don't have to list every package you
+reach transitively. The stdlib, installed packages, and files under
+your repo that no target declares are all ignored.
+
 **The one trap: don't give a module the same name as its own package
 directory.** A file `greeting/greeting.py` shadows the package
 `greeting` whenever a test in that same directory runs, because the
@@ -339,7 +358,7 @@ The entire CLI is two subcommands:
 
 | Command | Effect |
 |---|---|
-| `lirk build <label>` | Check every declared file exists and every src parses as Python, for the target and its transitive deps. |
+| `lirk build <label>` | Check every declared file exists, every src parses as Python, and every cross-package import is declared in `deps`, for the target and its transitive deps. |
 | `lirk test <label>` | Run each test src via `python3 -m unittest`, after building its deps. |
 
 | Flag | Applies to | Effect |
@@ -412,6 +431,14 @@ dependency changes.
 **`FAIL ...: missing source file(s): greet.py`.** A declared src or
 data path doesn't exist. Only that target fails; unrelated targets
 still build, and its dependents report `SKIP`.
+
+**`FAIL //cli:cli: render.py imports 'orrery.camera' (//orrery:orrery),
+not in deps`.** A src imports a module belonging to a target this one
+doesn't depend on, directly or transitively. Add the named label to
+that target's `deps`. If the import is genuinely wrong, delete it
+instead — but don't reach for a workaround: the check exists because an
+undeclared import silently escapes the fingerprint. See [Getting the
+imports right](#getting-the-imports-right).
 
 **`FAIL ...: fixture.txt: syntax error: invalid syntax`.** A
 non-Python file is in `srcs`. Move it to `data`.

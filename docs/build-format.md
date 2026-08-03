@@ -31,6 +31,26 @@ deps = [":mylib"]
   to `[]`. Label resolution (`//path:name` vs `:name`) happens when
   the dependency graph is built across all packages, not at parse
   time.
+
+  **`deps` is enforced against what the srcs actually import.** If a
+  src imports a module belonging to a target outside this one's
+  dependency closure, the build fails:
+
+  ```
+  FAIL //cli:cli: render.py imports 'orrery.camera' (//orrery:orrery), not in deps
+  ```
+
+  This is a correctness check, not style policing. Targets run with the
+  repo root importable, so Python resolves a cross-package import
+  whether or not you declared it — and an undeclared edge is missing
+  from the fingerprint, so editing the imported package invalidates
+  nothing and you get a cached PASS against changed inputs. Declaring
+  the dep is the fix.
+
+  Checked against the **transitive closure**, so an import satisfied by
+  a dep-of-a-dep is fine; the fingerprint covers it either way.
+  Imports of the stdlib, of installed packages, and of files under the
+  repo root that no target declares as a src are not reported.
 - **`data`** — list of paths relative to the package directory, for
   things the target depends on that are not Python source (e.g. a
   `.txt` fixture read at runtime). Defaults to `[]`. Fingerprinted the

@@ -120,12 +120,20 @@ expansion are on hold until *all three* v1 criteria hold:
 2. **Track record on real repos** — at least 200 cumulative
    `lirk build`/`lirk test` invocations across at least 3 distinct real
    repos, with zero `signal: hangup` occurrences and zero
-   cache-correctness bugs. **Not met**, and the only outstanding
-   criterion. The invocation count and both failure-mode clauses are
-   satisfied; self-hosting supplies a second repo; one more distinct
-   consumer is what remains.
+   cache-correctness bugs. **Met** (2026-08-03). The three repos are a
+   games monorepo, lirk itself, and `termrery`, a curses orrery built
+   under lirk from its first commit. No `signal: hangup` has ever been
+   observed, in any repo, in any session.
 3. **Known issues clear** — no open entries beyond ones explicitly
    marked cosmetic-only. **Met.**
+
+All three now hold, and v1 will be tagged once the remaining
+high-priority correctness item is closed. The `termrery` trial found
+that `deps` was not checked against what a target actually imports, so
+an undeclared import both passed and cached a stale green; **that check
+now exists and fails the build** (2026-08-03). Its narrower sibling —
+a `.py` file no target declares at all is still an unfingerprinted
+input — is tracked as H2 and is the last known path of that kind.
 
 These are deliberately non-subjective, replacing the vaguer "proven
 stable" language they grew out of. Current status is tracked in

@@ -12,6 +12,7 @@ import ast
 import os
 import subprocess
 import sys
+from collections.abc import Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,6 +37,24 @@ class ActionResult:
     stderr: str = ""
 
 
+@dataclass(frozen=True)
+class ImportEnv:
+    """Repo context the import check needs, assembled by the caller.
+
+    Passed in rather than derived here so this module stays free of the
+    graph layer: `owners` is a repo-wide index and `allowed` is
+    per-target, and only the CLI has both.
+
+    - `owners`: resolved absolute path of every declared src -> the
+      label of the target declaring it.
+    - `allowed`: the labels this target may import from -- its whole
+      transitive dep closure, including itself.
+    """
+
+    owners: Mapping[Path, str]
+    allowed: Set[str]
+
+
 def missing_files(target: Target, root: Path) -> list[str]:
     """Declared srcs/data files (relative to the target's package) that
     don't exist. Checked up front by the CLI, before fingerprinting,
@@ -55,10 +74,147 @@ def missing_files(target: Target, root: Path) -> list[str]:
     return missing
 
 
-def validate_target(target: Target, root: Path) -> ActionResult:
-    """'Build' a target: confirm its declared source files exist and
-    parse as syntactically valid Python. No compilation step beyond
-    that (v1 has no bytecode/artifact output)."""
+def owner_index(targets: Mapping[str, Target], root: Path) -> dict[Path, str]:
+    """Resolved path of every declared src -> the label declaring it.
+
+    Built once per run and shared by every target's ImportEnv. If two
+    targets declare the same src the later one in graph order wins; that
+    is a repo-configuration oddity this index isn't the place to
+    diagnose, and either answer names a real declaring target.
+    """
+    return {
+        (root / target.package / src).resolve(): label
+        for label, target in targets.items()
+        for src in target.srcs
+    }
+
+
+def _imported_modules(tree: ast.AST, src_path: Path) -> list[tuple[str, Path | None]]:
+    """Every module an AST imports, as (dotted name, base directory).
+
+    The base is None for an absolute import (resolve it against sys.path
+    as the runner sets it up) and an explicit directory for a relative
+    one.
+
+    `from pkg import name` yields both `pkg` and `pkg.name`: `name` may
+    be a submodule -- which is an edge into another package -- or an
+    ordinary attribute, which simply won't resolve to a file and is
+    ignored.
+    """
+    found: list[tuple[str, Path | None]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.extend((alias.name, None) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base: Path | None = None
+            if node.level:
+                # `.` is the src's own directory, `..` its parent, etc.
+                base = src_path.parent
+                for _ in range(node.level - 1):
+                    base = base.parent
+            prefix = node.module or ""
+            if prefix:
+                found.append((prefix, base))
+            for alias in node.names:
+                dotted = f"{prefix}.{alias.name}" if prefix else alias.name
+                found.append((dotted, base))
+    return found
+
+
+def _resolve_module(dotted: str, bases: Sequence[Path]) -> Path | None:
+    """The file a dotted module name resolves to under `bases`, or None.
+
+    Mirrors how the runner actually sets up imports (see run_test): the
+    target's own package directory is `sys.path[0]`, and the repo root
+    is on PYTHONPATH. Anything resolving outside those -- the stdlib,
+    site-packages -- returns None and is not lirk's business.
+
+    Resolves the full dotted path to one file, rather than also
+    collecting the `__init__.py` of each package along the way. Those
+    ancestors are inputs too in principle, but in a repo that declares
+    its packages at all they belong to the same target as the module
+    itself, and chasing them turns one clear error into several.
+    """
+    parts = dotted.split(".")
+    if not all(parts):
+        return None
+    for base in bases:
+        candidate = base.joinpath(*parts)
+        module = candidate.with_suffix(".py")
+        if module.is_file():
+            return module
+        init = candidate / "__init__.py"
+        if init.is_file():
+            return init
+    return None
+
+
+def undeclared_imports(
+    target: Target,
+    root: Path,
+    env: ImportEnv,
+    parsed: Iterable[tuple[str, ast.AST]],
+) -> list[str]:
+    """Imports reaching a target outside this one's declared dep closure.
+
+    This is what stops `deps` from being decoration. Because targets run
+    with the repo root importable, Python resolves a cross-package
+    import whether or not the edge is declared -- so an undeclared edge
+    is not merely undocumented, it is *absent from the fingerprint*, and
+    editing the imported package invalidates nothing. The result is a
+    cached PASS that `--force` turns into a FAIL. See docs/TASKS.md H1.
+
+    Checked against the transitive closure, not direct deps only: the
+    stale-input problem is closed as soon as the dependency is folded
+    into the fingerprint, which the closure does. Requiring a direct
+    edge is a stricter hygiene rule (Bazel's "strict deps") that buys no
+    additional correctness here, and would reject lirk's own BUILD
+    files.
+
+    A file no target declares is *not* reported. It is the same family
+    of stale input, but it belongs to a different fix (see docs/TASKS.md
+    H2) and firing here would reject ordinary repos: a package
+    `__init__.py` that no target lists as a src is common, including in
+    lirk's own fixtures.
+    """
+    pkg_dir = root / target.package
+    root_resolved = root.resolve()
+    problems: list[str] = []
+    seen: set[tuple[str, str]] = set()
+
+    for src, tree in parsed:
+        src_path = (pkg_dir / src).resolve()
+        for dotted, base in _imported_modules(tree, src_path):
+            bases = [base] if base is not None else [pkg_dir, root]
+            found = _resolve_module(dotted, bases)
+            if found is None:
+                continue
+            found = found.resolve()
+            if not found.is_relative_to(root_resolved):
+                continue
+            owner = env.owners.get(found)
+            if owner is None or owner in env.allowed:
+                continue
+            if (src, dotted) in seen:
+                continue
+            seen.add((src, dotted))
+            problems.append(f"{src} imports '{dotted}' ({owner}), not in deps")
+
+    return problems
+
+
+def validate_target(
+    target: Target, root: Path, env: ImportEnv | None = None
+) -> ActionResult:
+    """'Build' a target: confirm its declared source files exist, parse
+    as syntactically valid Python, and -- when `env` is supplied --
+    import only from the targets this one declares. No compilation step
+    beyond that (v1 has no bytecode/artifact output).
+
+    `env` is None only when a target is validated with no repo context
+    around it (unit tests do this); the CLI always supplies one, so the
+    import check is not optional in a real run.
+    """
     pkg_dir = root / target.package
     missing = missing_files(target, root)
     if missing:
@@ -66,6 +222,7 @@ def validate_target(target: Target, root: Path) -> ActionResult:
             target.label, False, f"missing source file(s): {', '.join(missing)}"
         )
 
+    parsed: list[tuple[str, ast.AST]] = []
     for src in target.srcs:
         src_path = pkg_dir / src
         try:
@@ -75,7 +232,7 @@ def validate_target(target: Target, root: Path) -> ActionResult:
             # -- a single-byte locale like cp1252 decodes arbitrary
             # bytes, so a binary file reaches ast.parse and reports a
             # confusing syntax error instead of "not readable".
-            ast.parse(
+            tree = ast.parse(
                 src_path.read_text(encoding="utf-8"), filename=str(src_path)
             )
         except SyntaxError as e:
@@ -86,13 +243,24 @@ def validate_target(target: Target, root: Path) -> ActionResult:
             return ActionResult(
                 target.label, False, f"{src}: not readable as Python source: {e}"
             )
+        parsed.append((src, tree))
+
+    if env is not None:
+        # Reuses the trees parsed above rather than re-reading the srcs:
+        # syntax validity is a precondition of the import check anyway,
+        # so a second parse would only be a second chance to disagree.
+        undeclared = undeclared_imports(target, root, env, parsed)
+        if undeclared:
+            return ActionResult(
+                target.label, False, "; ".join(undeclared)
+            )
 
     return ActionResult(target.label, True, "ok")
 
 
-def run_test(target: Target, root: Path) -> ActionResult:
+def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> ActionResult:
     """Run a test target's source files via `python3 -m unittest`."""
-    validation = validate_target(target, root)
+    validation = validate_target(target, root, env)
     if not validation.ok:
         return validation
 

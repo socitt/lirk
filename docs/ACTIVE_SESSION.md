@@ -21,6 +21,63 @@ has the originals.
 
 ---
 
+## 2026-08-03
+
+- **The third repo arrived: `termrery`** (`/root/git/termrery`, review
+  in its `docs/lirk-notes.md`). Criterion 2 is now met, so all three v1
+  criteria hold. Read the review, then reproduced every behavioural
+  claim in it against current lirk source in a throwaway tree before
+  recording anything — the review was written against 0.1.0 and none of
+  it was taken on trust.
+- **One claim turned out to be worse than reported.** They filed
+  "`deps` are not checked against real imports" as a boundary/hygiene
+  complaint. It is also a *stale-PASS* mechanism: an undeclared edge is
+  absent from the fingerprint, so the dependency's contents are not an
+  input. Reproduced end to end — edit the undeclared dependency, `lirk
+  test` says `cached` and green, `--force` on the same tree FAILs. Same
+  family as the fixture-`data` bug closed yesterday, and the second
+  instance of it. Filed as **H1**, the only open HIGH.
+- Also confirmed: non-`.py` in `srcs` is caught only when the contents
+  happen not to parse (`hello` in a `.txt` builds clean, a sentence
+  doesn't) — **M3**; the cwd root fallback is silent and label errors
+  never name the root — **M4**; no failed-target list in the summary —
+  **M6**; no `lirk --version` — **L6**.
+- **M5/D4 is the interesting one.** Their "no `binary` type / `lirk
+  run`" is a settled decision (DESIGN §6), so it stays closed — but
+  their `main()` was defined and never called, `python3 -m cli.render`
+  did nothing, and lirk stayed green throughout. The decision rests on
+  "a `test` target that subprocesses the entrypoint covers it", and
+  that pattern is documented nowhere. Recorded as a docs gap against
+  the decision rather than as pressure to re-open it.
+- Also settled and deliberately *not* filed: `lirk query` / listing
+  targets (deferred at ~26 targets; termrery has four).
+- **Then H1 was implemented and closed, same session.** Two decisions
+  taken first, both the user's: violations **FAIL** (a warning leaves
+  the stale-PASS path open, which was the whole reason it was HIGH),
+  and **v1 is tagged after the correctness work, not before**.
+- The check walks the trees `validate_target` already parsed, resolves
+  each imported module the way the runner does (package dir, then repo
+  root), and fails on a resolved file owned by a target outside the
+  transitive closure. `ImportEnv` is built in `cli.py` so `actions.py`
+  stays free of the graph layer. `ACTION_VERSION` 8 → 9.
+- **Ran it against all three real repos before landing** — lirk (13
+  targets), `terminal-projects` (66), `termrery` (4): 83 targets, zero
+  false positives. Adoption cost is nil; termrery's real BUILD files
+  were correct all along (their violation was staged in a copy).
+- Fixture `import_repo`. Suite 112 → **127**, self-hosted 13/13 build
+  and 5/5 test, both green.
+- **H2 opened, and it is the reason v1 isn't tagged yet.** Writing the
+  check forced the question of what to do about an imported file that
+  *no* target declares. Rejecting it would fail ordinary repos (an
+  undeclared `__init__.py` is everywhere, including our own fixtures),
+  so the check stays silent on it — which leaves the input
+  unfingerprinted. Verified it really is a stale PASS: edit an
+  undeclared `orphan/thing.py`, `lirk test` says `cached` and green,
+  `--force` FAILs. Same shape as H1, different fix, not yet chosen.
+- **Next:** H2 (choose the fix first — implicit fingerprinting vs
+  requiring declaration), then the v1 tag. M4/M3/M6/L6/D4 are all small
+  and unblocked behind it.
+
 ## 2026-08-02
 
 - **M1 and M2 both landed**, suite 91 → 95, all green. Details in

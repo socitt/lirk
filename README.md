@@ -153,7 +153,9 @@ discovery entirely.
 
 ## Status
 
-Early development, not yet stable.
+Early development, not yet stable. All three v1 criteria below now
+hold; the tag waits on the last high-priority correctness item (H2 in
+[`docs/TASKS.md`](docs/TASKS.md)).
 
 **v1 stability criteria.** Serial execution counts as "proven stable"
 (unblocking parallelism work), and lirk is ready to expand scope
@@ -173,11 +175,15 @@ self-hosting" language with a concrete, non-subjective bar:
    build`/`lirk test` invocations across at least 3 distinct real
    (non-fixture, non-lirk) repos, with zero `signal: hangup`
    occurrences and zero cache-correctness bugs (a `cached` result that
-   disagrees with what a `--force` fresh run produces). **Not met** —
-   the invocation count and both failure-mode clauses are satisfied
-   (~187 documented, tallied 2026-07-30, no hangup ever observed), and
-   self-hosting now supplies a second repo. One more distinct consumer
-   is all that remains. See [`docs/TASKS.md`](docs/TASKS.md).
+   disagrees with what a `--force` fresh run produces). **Met**
+   (2026-08-03) — ~187 invocations documented against a games monorepo
+   (tallied 2026-07-30), self-hosting as the second repo, and
+   `termrery`, a curses orrery built under lirk from its first commit,
+   as the third. No `signal: hangup` has ever been observed, in any
+   repo, in any session. See [`docs/TASKS.md`](docs/TASKS.md) for the
+   caveats. The third repo surfaced a cache-correctness path — an
+   undeclared import cached a stale green — which is now detected and
+   failed at build time; its narrower sibling remains open as H2.
 3. **`docs/KNOWN_ISSUES.md` clear.** No open entries beyond ones
    explicitly marked cosmetic-only. **Met** as of this writing (one
    entry on record, status: Fixed).

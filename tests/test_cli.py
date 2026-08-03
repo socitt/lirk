@@ -97,6 +97,60 @@ class BuildCommandTests(unittest.TestCase):
         self.assertIn("lirk: 0 built, 0 cached, 1 failed", out)
 
 
+class ImportCheckWiringTests(unittest.TestCase):
+    """The import check only runs if the CLI supplies an ImportEnv.
+
+    validate_target skips it when none is passed, so these are the tests
+    that would catch it being dropped from the CLI entirely -- the unit
+    tests in test_actions build their own env and would all still pass.
+    """
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "import_repo", self.root)
+
+    def test_build_fails_on_an_undeclared_import(self):
+        code, out = _run(["build", "//leaf:undeclared"], self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", out)
+        self.assertIn("base.base", out)
+        self.assertIn("//base:base", out)
+
+    def test_build_passes_once_the_dep_is_declared(self):
+        code, out = _run(["build", "//leaf:declared"], self.root)
+
+        self.assertEqual(code, 0, out)
+
+    def test_a_failing_import_check_is_not_cached(self):
+        # Only successful results reach the cache, so the second run must
+        # report the failure again rather than a cached anything -- a
+        # cached failure would hide the fix once it lands.
+        _run(["build", "//leaf:undeclared"], self.root)
+        code, out = _run(["build", "//leaf:undeclared"], self.root)
+
+        self.assertEqual(code, 1)
+        self.assertNotIn("  cached  ", out)
+        self.assertIn("base.base", out)
+
+    def test_test_command_fails_on_an_undeclared_import(self):
+        code, out = _run(["test", "//leaf:undeclared_test"], self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("base.base", out)
+
+    def test_a_target_outside_the_requested_subset_still_owns_its_srcs(self):
+        # The owner index is built from the whole graph, not the subset
+        # being built: //base:base isn't in //leaf:undeclared's closure,
+        # which is exactly why it must still be found as the owner.
+        code, out = _run(["build", "//leaf:undeclared"], self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("//base:base", out)
+
+
 class TestCommandTests(unittest.TestCase):
     def setUp(self):
         tmpdir = tempfile.TemporaryDirectory()

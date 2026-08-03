@@ -3,11 +3,25 @@ from pathlib import Path
 from unittest.mock import patch
 
 from lirk import actions
-from lirk.actions import run_test, validate_target
-from lirk.graph import build_graph
+from lirk.actions import ImportEnv, owner_index, run_test, validate_target
+from lirk.graph import build_graph, transitive_closure
 from lirk.targets import Target
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _import_env(graph, root, label):
+    """The ImportEnv the CLI would build for `label`.
+
+    Uses actions.owner_index, the same function the CLI uses, so this
+    helper can't drift into testing a different index than the one that
+    ships. What it does duplicate is the *wiring* -- that the CLI passes
+    an env at all is covered end to end in test_cli.
+    """
+    return ImportEnv(
+        owners=owner_index(graph.targets, root),
+        allowed=transitive_closure(graph, {label}),
+    )
 
 
 class ValidateTargetTests(unittest.TestCase):
@@ -84,6 +98,129 @@ class ValidateTargetTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         self.assertIn("nope.txt", result.message)
+
+
+class ImportCheckTests(unittest.TestCase):
+    """`deps` checked against what the srcs actually import (TASKS.md H1).
+
+    The bug being closed is not untidiness: an undeclared edge is absent
+    from the fingerprint, so editing the imported package leaves a
+    cached PASS that --force turns into a FAIL.
+    """
+
+    ROOT = FIXTURES / "import_repo"
+
+    def setUp(self):
+        self.graph = build_graph(self.ROOT)
+
+    def _validate(self, label):
+        return validate_target(
+            self.graph.targets[label], self.ROOT, _import_env(self.graph, self.ROOT, label)
+        )
+
+    def test_undeclared_cross_package_import_fails(self):
+        result = self._validate("//leaf:undeclared")
+
+        self.assertFalse(result.ok)
+        # Names the src, the module, and the target that owns it -- all
+        # three are needed to know what to add to which BUILD file.
+        self.assertIn("undeclared.py", result.message)
+        self.assertIn("base.base", result.message)
+        self.assertIn("//base:base", result.message)
+
+    def test_same_import_passes_once_the_dep_is_declared(self):
+        # declared.py and undeclared.py contain the same import; only the
+        # BUILD file differs. Without this pair a check that rejected
+        # everything would look correct.
+        result = self._validate("//leaf:declared")
+
+        self.assertTrue(result.ok, result.message)
+
+    def test_transitive_dependency_is_allowed(self):
+        # //leaf:transitive imports base.base but declares only //mid:mid,
+        # which declares //base:base. Allowed: the closure is what the
+        # fingerprint folds in, so nothing can go stale. Requiring a
+        # direct edge would also reject lirk's own BUILD files.
+        result = self._validate("//leaf:transitive")
+
+        self.assertTrue(result.ok, result.message)
+
+    def test_stdlib_imports_are_ignored(self):
+        # transitive.py also imports json; if stdlib resolution leaked in,
+        # the assertion above would fail. Asserted explicitly so the
+        # reason a regression here breaks is legible.
+        result = self._validate("//leaf:transitive")
+
+        self.assertNotIn("json", result.message)
+
+    def test_sibling_target_in_the_same_package_still_needs_a_dep(self):
+        # helper.py is in leaf/ too, but belongs to //leaf:helper.
+        # Ownership is per target, not per directory -- the fingerprint
+        # is per target as well.
+        result = self._validate("//leaf:sibling")
+
+        self.assertFalse(result.ok)
+        self.assertIn("//leaf:helper", result.message)
+
+    def test_imports_within_a_targets_own_srcs_are_allowed(self):
+        # selfrel.py imports selfmod both flat (`import selfmod`, resolved
+        # via the package dir being sys.path[0]) and relative
+        # (`from . import selfmod`). Neither is an edge anywhere.
+        result = self._validate("//leaf:selfrel")
+
+        self.assertTrue(result.ok, result.message)
+
+    def test_import_of_a_file_no_target_declares_is_not_reported(self):
+        # orphan/thing.py exists and is undeclared. That is a real
+        # unfingerprinted input (TASKS.md H2), but reporting it here
+        # would reject ordinary repos -- an undeclared package
+        # __init__.py is common, including in these fixtures.
+        result = self._validate("//leaf:orphan_user")
+
+        self.assertTrue(result.ok, result.message)
+
+    def test_check_is_skipped_without_repo_context(self):
+        # validate_target(target, root) with no env still means "syntax
+        # only". Documented here because it is the one way the check can
+        # be absent, and a caller forgetting it must be a visible choice.
+        result = validate_target(self.graph.targets["//leaf:undeclared"], self.ROOT)
+
+        self.assertTrue(result.ok, result.message)
+
+    def test_a_test_target_fails_before_running_anything(self):
+        # run_test validates first, so an undeclared import in a test
+        # target is caught without spawning a subprocess -- this is the
+        # path where the stale PASS was observed.
+        label = "//leaf:undeclared_test"
+        target = self.graph.targets[label]
+
+        with patch.object(actions.subprocess, "run") as fake_run:
+            result = run_test(target, self.ROOT, _import_env(self.graph, self.ROOT, label))
+
+        self.assertFalse(result.ok)
+        self.assertIn("base.base", result.message)
+        fake_run.assert_not_called()
+
+    def test_every_offending_src_is_reported_not_just_the_first(self):
+        # A target with two bad srcs must name both; stopping at the
+        # first turns one fix into two round trips.
+        target = self.graph.targets["//leaf:undeclared"]
+        both = Target(
+            name=target.name,
+            type=target.type,
+            srcs=("undeclared.py", "sibling.py"),
+            deps=(),
+            data=(),
+            package=target.package,
+        )
+
+        result = validate_target(
+            both, self.ROOT, _import_env(self.graph, self.ROOT, "//leaf:undeclared")
+        )
+
+        self.assertFalse(result.ok)
+        self.assertIn("undeclared.py", result.message)
+        self.assertIn("sibling.py", result.message)
 
 
 class RunTestTests(unittest.TestCase):

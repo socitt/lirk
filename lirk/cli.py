@@ -10,7 +10,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from lirk.actions import missing_files, run_test, validate_target
+from lirk.actions import (
+    ImportEnv,
+    missing_files,
+    owner_index,
+    run_test,
+    validate_target,
+)
 from lirk.cache import (
     CACHE_FILENAME,
     CacheError,
@@ -95,6 +101,11 @@ def _execute(
     ok = True
     summary = ExecutionSummary()
 
+    # Built from the whole graph, not `order`: a target may import from
+    # a package outside the requested subset, and that is exactly the
+    # case worth catching.
+    owners = owner_index(graph.targets, root)
+
     # Check every target's declared files exist before fingerprinting
     # anything: compute_fingerprints reads file contents unconditionally,
     # so a missing file reached from there would otherwise surface as an
@@ -166,11 +177,13 @@ def _execute(
                 summary.tests_cached += 1
             continue
 
+        env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}))
+
         if is_test:
-            result = run_test(target, root)
+            result = run_test(target, root, env)
             verb = "PASS" if result.ok else "FAIL"
         else:
-            result = validate_target(target, root)
+            result = validate_target(target, root, env)
             verb = "built" if result.ok else "FAIL"
 
         if result.ok:

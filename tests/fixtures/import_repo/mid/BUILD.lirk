@@ -1,0 +1,5 @@
+[[target]]
+name = "mid"
+type = "library"
+srcs = ["mid.py"]
+deps = ["//base:base"]
