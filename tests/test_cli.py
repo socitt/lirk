@@ -19,6 +19,23 @@ def _run(argv, root):
     return code, out.getvalue()
 
 
+def _run_both(argv, root=None, cwd=None):
+    """Like _run, but captures stderr too, and can leave `root` unset so
+    discovery actually runs. Diagnostics about the root go to stderr, so
+    _run alone cannot see them.
+    """
+    out, err = io.StringIO(), io.StringIO()
+    previous = Path.cwd()
+    if cwd is not None:
+        os.chdir(cwd)
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(argv, root=root)
+    finally:
+        os.chdir(previous)
+    return code, out.getvalue(), err.getvalue()
+
+
 class BuildCommandTests(unittest.TestCase):
     def setUp(self):
         tmpdir = tempfile.TemporaryDirectory()
@@ -527,6 +544,136 @@ class RootDiscoveryEndToEndTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("lirk: OK", out.getvalue())
+
+
+class RootIsNamedTests(unittest.TestCase):
+    """What `//` resolved against, said out loud (TASKS.md M4).
+
+    The cwd fallback is legitimate behavior, but it is invisible, so
+    `//` silently means a different thing depending on which directory
+    you were standing in. From the repo root that is indistinguishable
+    from working; one directory down it produces an error about a
+    dependency, never about the root.
+    """
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.repo_root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.repo_root)
+
+    def test_falling_back_to_cwd_says_so(self):
+        # No marker anywhere: the fallback fires and must announce itself.
+        _, _, err = _run_both(["build", "//a:a_lib"], cwd=self.repo_root)
+
+        self.assertIn(".lirk-root", err)
+        self.assertIn(str(self.repo_root), err)
+
+    def test_no_announcement_when_a_marker_is_found(self):
+        # The message is a warning about an implicit choice, so an
+        # explicit one must stay quiet -- otherwise it is noise on every
+        # run of every correctly configured repo.
+        (self.repo_root / ".lirk-root").touch()
+
+        _, _, err = _run_both(["build", "//a:a_lib"], cwd=self.repo_root)
+
+        self.assertNotIn("using the current directory", err)
+
+    def test_no_announcement_when_root_is_given_explicitly(self):
+        _, _, err = _run_both(
+            ["build", "//a:a_lib", "--root", str(self.repo_root)], cwd=self.repo_root
+        )
+
+        self.assertNotIn("using the current directory", err)
+
+    def test_a_graph_error_names_the_root(self):
+        # termrery's exact confusion: run from a package subdirectory
+        # with no marker, and the dep error points at the dep while the
+        # real fault is that the root moved.
+        _, _, err = _run_both(["build", "//..."], cwd=self.repo_root / "a")
+
+        self.assertIn("does not exist", err)
+        self.assertIn(str(self.repo_root / "a"), err)
+
+    def test_an_unknown_target_names_the_root(self):
+        _, _, err = _run_both(["build", "//nope:missing"], root=self.repo_root)
+
+        self.assertIn("unknown target", err)
+        self.assertIn(str(self.repo_root), err)
+
+
+class FailureListTests(unittest.TestCase):
+    """A failing run restates which targets failed (TASKS.md M6).
+
+    Not a summarizing layer over test output: these are labels lirk
+    already printed, reprinted below the output that buried them.
+    """
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+
+    def test_failing_test_run_lists_the_failed_label(self):
+        shutil.copytree(FIXTURES / "failing_test_repo", self.root)
+
+        code, out = _run(["test", "//..."], self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("lirk: failed:", out)
+        # Below the captured unittest output, which is what buries the
+        # original per-target FAIL line.
+        self.assertLess(out.index("Traceback"), out.index("lirk: failed:"))
+
+    def test_a_clean_run_prints_no_failure_list(self):
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+        code, out = _run(["build", "//..."], self.root)
+
+        self.assertEqual(code, 0)
+        self.assertNotIn("lirk: failed:", out)
+
+    def test_skipped_dependents_are_not_listed_as_failures(self):
+        # A SKIP is a consequence of someone else's failure. Listing it
+        # alongside the real failure doubles the list and buries the one
+        # label worth acting on.
+        shutil.copytree(FIXTURES / "failed_dep_repo", self.root)
+
+        code, out = _run(["build", "//..."], self.root)
+
+        self.assertEqual(code, 1)
+        listed = out.split("lirk: failed:")[1]
+        self.assertIn("SKIP", out)
+        skipped = [
+            line.split()[1]
+            for line in out.splitlines()
+            if line.strip().startswith("SKIP")
+        ]
+        self.assertTrue(skipped)
+        for label in skipped:
+            self.assertNotIn(label, listed)
+
+
+class VersionFlagTests(unittest.TestCase):
+    """`lirk --version` without naming a subcommand (TASKS.md L6)."""
+
+    def test_version_flag_exits_zero_without_a_subcommand(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            with self.assertRaises(SystemExit) as caught:
+                main(["--version"])
+
+        self.assertEqual(caught.exception.code, 0)
+        self.assertIn("lirk", out.getvalue())
+
+    def test_a_missing_subcommand_is_still_an_error(self):
+        # The flag must not make the required subcommand optional.
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            with self.assertRaises(SystemExit) as caught:
+                main([])
+
+        self.assertNotEqual(caught.exception.code, 0)
 
 
 if __name__ == "__main__":

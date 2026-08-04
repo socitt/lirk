@@ -55,8 +55,39 @@ has the originals.
   Not folded in, because collecting ancestors turns one clear error into
   several — the reason `_resolve_module` was written that way.
   `ACTION_VERSION` 9 → 10. Suite 127 → 130.
-- **Next: tag v1.** Nothing blocks it now. M4/M3/M6/L6/D4 are all small
-  and are post-tag polish; none changes what a passing build means.
+- **Then cleared the rest of the backlog in the same session** — M4,
+  M3, M6, L6 and D4, which was everything the termrery trial produced
+  beyond H1. None of them changes what a passing build means, so no
+  `ACTION_VERSION` bump.
+- **M4** was two independent changes, as filed: a stderr note when the
+  cwd fallback fires, and `lirk: repo root is <path>` on graph and
+  unknown-target errors. Deliberately *suppressed* when a marker is
+  found or `--root` is passed — a warning about an implicit choice
+  becomes noise the moment the choice is explicit, and a message on
+  every run of every correct repo trains people to skip it.
+- **M3** rejects non-`.py` `srcs` by extension at parse time, pointing
+  at `data`. Checked the fixtures first: nothing declares a non-`.py`
+  src, and `binary_src_repo`'s PNG is *named* `broken.py` — which is
+  precisely the case an extension check can't reach and
+  `validate_target`'s decode guard still must, so both checks earn
+  their place.
+- **M6** lists failed labels above the counts. The test asserts the list
+  lands *below* the unittest traceback; above it would reproduce the
+  exact problem the item was filed about.
+- **L6** uses a custom argparse action rather than `action="version"`,
+  so `importlib.metadata` is imported only when the flag is passed.
+  DESIGN §6 settled that startup cost dominates every invocation, and
+  it would be a poor trade to add to it for a flag almost nobody runs.
+- **D4** is a worked "Covering your entry point" section in
+  `getting-started.md`, with the instruction to assert starts / exits 0
+  / produces output — exit code alone passes for a program whose
+  `main()` is never called, which was termrery's actual failure.
+- Suite 130 → **143**, self-hosted 13/13 build and 5/5 test.
+- **Next: tag v1, and it is the only item left that can be done from
+  inside the repo.** It needs one decision that can't: `pyproject.toml`
+  still says `0.1.0`, and no criterion ever fixed a version number.
+  D2 (needs the upstream issue URL) and L7/L3 (deliberately deferred)
+  are the rest.
 
 ## 2026-08-03
 

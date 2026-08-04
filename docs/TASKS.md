@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-08-04): 130 tests, `python3 -m
+Last verified against source (2026-08-04): 143 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
 `lirk build //...` (13 targets) and `lirk test //...` (5 test targets)
 — which runs alongside the unittest invocation rather than replacing
@@ -152,9 +152,9 @@ defect. Recheck this whenever an entry is added.
 Ordered by priority. Everything here was verified against current
 source; nothing is carried forward from resolved historical reports.
 
-H1, M3–M6 and L6 all came from the termrery trial (2026-08-03) and were
-reproduced against current source before being written here; the repros
-are given inline so no one has to take the source repo's word for it.
+The termrery trial (2026-08-03) produced H1 and M3–M6 and L6; all are
+now closed. What remains open is only what needs input from outside the
+repo, or what was left deliberately.
 
 ### HIGH
 
@@ -163,78 +163,7 @@ stale-PASS path remains open.*
 
 ### MEDIUM
 
-M1 and M2 are closed — see Recently closed.
-
-**M3 — `srcs` accepts non-`.py` files, and only catches them by
-accident.** Nothing checks the extension; a src is rejected only if its
-contents fail `ast.parse`. Whether a text file is caught therefore
-depends on what it says:
-
-```
-srcs = ["notes.txt"]     # "a rough note about the module" -> FAIL, syntax error
-srcs = ["oneword.txt"]   # "hello"                         -> built, OK
-```
-
-DESIGN.md §2 states flatly that "a `.txt` fixture in `srcs` produces a
-bogus syntax error"; that is true only for contents that don't happen
-to parse. A one-word file, an empty file, or anything else Python
-accepts sails through into `srcs`, where every consumer assumes it is
-importable. Rejecting non-`.py` in `srcs` by extension makes the
-`srcs`/`data` split self-teaching — termrery's point was that the
-distinction exists but nothing steers you toward it — and makes
-DESIGN.md's claim true as written.
-
-**M4 — the root fallback to cwd is silent, and label errors don't say
-what the root was.** Documented behavior is "nearest ancestor
-containing `.lirk-root`, else cwd itself" (`_discover_root`). When the
-marker is missing the fallback is invisible, so `//` silently changes
-meaning depending on which directory you're standing in. From the repo
-root everything looks fine; from a package subdirectory that package
-becomes the root, and you get an error about a dependency:
-
-```
-$ cd cli && lirk build //...        # marker deleted
-lirk: //:cli: dependency '//orrery:orrery' does not exist
-```
-
-The message points at the dep. The actual fault is that the root became
-`cli/`, which nothing on screen says. termrery notes this bit an
-earlier attempt at that project badly enough that creating `.lirk-root`
-is now the first instruction in its README. Two cheap fixes, both
-worth doing: say which directory was chosen as the root and why when
-falling back to cwd, and name the root in the error when a `//` label
-fails to resolve.
-
-**M5 — an entry point can be dead and every lirk command stays
-green.** `lirk run` and a `binary` type are a settled decision (DESIGN
-§6: "the need is fully met by `test` targets that subprocess the
-entrypoint"), and this entry does **not** re-open it. What termrery
-supplies is evidence about the *documented alternative*: nobody wrote
-that test target, because nothing in the docs says to. Their `main()`
-was defined and never called, so `python3 -m cli.render` did nothing at
-all while `lirk build //...` reported OK throughout — the application
-the repo exists to produce was the one artifact lirk had no opinion
-about.
-
-The settled decision holds only if the pattern that replaces it is
-discoverable, and right now it isn't documented anywhere. *What's
-left:* a worked entrypoint-as-`test`-target example in
-`getting-started.md` — a `test` target whose src subprocesses the real
-entry point and asserts it starts, exits, and prints something. See D4.
-
-**M6 — a failing run prints no list of what failed.** `_execute` prints
-per-target lines as it goes and then a counts-only summary (`lirk: 0/1
-tests passed`). Test output goes through unmodified, which is correct
-and is a settled decision (§6, no summarizing layer) — but with a few
-packages the failing target's own line scrolls off above the unittest
-dump, and the summary that survives on screen says only how many
-failed, not which. On a phone terminal that means scrolling back
-through a full traceback to recover a label you already saw.
-
-A trailing list of failed labels is not a summarizing layer over test
-output — it restates labels lirk already printed, and touches nothing
-about the captured stdout/stderr. Cheap: `_execute` already has
-`failed`.
+*None. M1–M6 are all closed — see Recently closed.*
 
 ### LOW
 
@@ -264,13 +193,6 @@ ancestors also turns one clear error into several, which is the reason
 `_resolve_module` doesn't do it. Worth doing if a repo ever hits it;
 not worth the message noise before that.
 
-**L6 — `lirk --version` isn't a flag.** `main`'s parser requires a
-subcommand, so `lirk --version` errors with the subcommand usage and
-`pip show lirk` is the workaround. One `parser.add_argument("--version",
-action="version", ...)` against the installed distribution version.
-Raised by termrery; trivial, and the first thing anyone reports a bug
-against.
-
 *Everything else on this list is closed — see Recently closed.*
 
 ### Raised by termrery, already settled — not backlog
@@ -278,8 +200,9 @@ against.
 Recorded so they aren't re-derived from the review as if they were new:
 
 - **A `binary` target type and `lirk run`** (their #2). Off the roadmap
-  per DESIGN §6. The real cost they hit is M5 above, which is a docs
-  gap in the replacement pattern, not a missing feature.
+  per DESIGN §6. The real cost they hit was M5 — a docs gap in the
+  replacement pattern, not a missing feature — and that pattern is now
+  written up in `getting-started.md` (D4, closed).
 - **`lirk query` / any way to list targets** (their #5 — "`grep -r
   '^name' */BUILD.lirk` is the current answer"). Deferred on evidence
   in §6, most recently at ~26 targets; termrery has four, so it is no
@@ -289,16 +212,6 @@ Recorded so they aren't re-derived from the review as if they were new:
 ---
 
 ## Documentation gaps
-
-**D4 — Document the entrypoint-as-`test`-target pattern.** The
-counterpart to M5: DESIGN §6 rules out `lirk run` on the grounds that a
-`test` target subprocessing the entry point covers it, and no document
-shows how. `getting-started.md` should carry a worked example —
-`subprocess.run([sys.executable, "-m", "cli.render", "--selftest"])`,
-or equivalent — asserting the entry point starts, exits 0, and produces
-output. That is what would have caught termrery's never-called
-`main()`. Small, and it is what makes a settled decision defensible
-rather than merely recorded.
 
 **D2 — Link the filed iSH-AOK issue from `KNOWN_ISSUES.md`.** The
 upstream JVM-crash report has been submitted, and the local draft was
@@ -316,26 +229,70 @@ done, so v1 is ready to tag** (decided 2026-08-03: fix first, tag after
 criteria exist to prevent). H1 and H2 are both closed, and **no known
 stale-PASS path remains open.**
 
-1. **Tag v1.** Nothing blocks it. Everything below is post-tag polish,
-   and none of it changes what a passing build means.
-2. **M4 — name the root.** Two small, independent changes (announce the
-   cwd fallback; put the root in unresolved-`//`-label errors) against
-   a failure that has now confused two separate projects.
-3. **M3 — reject non-`.py` in `srcs`.** Small, and makes DESIGN §2's
-   existing claim true as written.
-4. **M6** and **L6**, both trivial. **D4** alongside whichever of these
-   gets picked up, since it's a docs edit rather than an engine change.
-5. **M5** is D4 — no engine work.
-6. **D2**, whenever convenient — needs the upstream issue URL, which is
-   not derivable from the repo.
-7. **L7**, only if a real repo hits it.
+The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
+2026-08-04), so nothing is queued behind the tag either.
 
-Apart from the half of L3 and the sliver of L7 deliberately left (see
-above), everything open came out of the termrery trial or the H1 work
-it prompted.
+1. **Tag v1.** The only outstanding item. Needs one decision that isn't
+   derivable from the repo: `pyproject.toml` still says `0.1.0`, and
+   tagging v1 means bumping it — `1.0.0` is the obvious reading of "v1",
+   but the criteria never fixed a number, so it is the author's call.
+2. **D2**, whenever convenient — needs the upstream iSH-AOK issue URL,
+   which is likewise not derivable from the repo.
+3. **L7**, only if a real repo hits it. **L3**'s remaining half only if
+   concurrent runs become a real workflow.
+
+Both remaining items need input from outside the repo. Everything that
+could be done from inside it is done.
 
 ## Recently closed
 
+- **M4 — the root is named, and the cwd fallback announces itself**
+  (2026-08-04). `main` prints a stderr note when no `.lirk-root` is
+  found, naming the directory it fell back to; graph errors and
+  unknown-target errors both print `lirk: repo root is <path>`. The note
+  is suppressed when a marker is found or `--root` is given — a warning
+  about an implicit choice is noise once the choice is explicit, and a
+  message on every run of every correctly configured repo would train
+  people to skip it. Tests cover all four cases, including termrery's
+  exact confusion (build from a package subdirectory with no marker: the
+  error says the dep doesn't exist, and now also says why).
+- **M3 — `srcs` is restricted to `.py`, by extension, at parse time**
+  (2026-08-04). Rejected in `_parse_target` with a message pointing at
+  `data`, so the `srcs`/`data` split is self-teaching rather than
+  something you discover later. This is what makes DESIGN §2's existing
+  claim true as written: left to `ast.parse`, `hello` in a `.txt` built
+  clean while a sentence didn't. No `ACTION_VERSION` bump — a
+  BUILD-parse error is loud and immediate, not a green result computed
+  under changed rules. The `binary_src_repo` fixture is unaffected
+  because its PNG is *named* `broken.py`, which is exactly the case an
+  extension check can't catch and `validate_target`'s decode guard
+  still must.
+- **M6 — a failing run lists what failed** (2026-08-04).
+  `_print_failures` restates the failed labels immediately above the
+  counts. Not the summarizing layer ruled out in DESIGN §6: it reprints
+  labels lirk already printed and touches nothing about captured
+  output. `SKIP`ped targets are deliberately excluded — they are
+  consequences, and listing them buries the label worth acting on. A
+  test asserts the list lands *below* the unittest traceback, since
+  landing above it would be no better than the line that already
+  scrolled off.
+- **L6 — `lirk --version` works without a subcommand** (2026-08-04).
+  Via a small custom argparse action rather than `action="version"`, so
+  `importlib.metadata` is imported only when the flag is passed —
+  DESIGN §6 settled that startup cost is the dominant per-invocation
+  expense, and a flag almost no run uses must not add to it. Prints a
+  clear "not installed; running from a source checkout" when the
+  distribution isn't found, rather than guessing a version. A test
+  asserts the flag didn't make the required subcommand optional.
+- **M5 / D4 — the entrypoint-as-`test`-target pattern is documented**
+  (2026-08-04). `getting-started.md` gains a "Covering your entry point"
+  section: a `--selftest` path on the entry point, a `test` target
+  whose src subprocesses `python3 -m cli.render`, and the instruction to
+  assert all three of starts / exits 0 / produces output — exit code
+  alone passes for a program whose `main()` is never called, which is
+  exactly termrery's failure. This is what makes DESIGN §6's rejection
+  of `lirk run` defensible rather than merely recorded: the decision
+  rests on the replacement being covered, and now it is discoverable.
 - **H2 — an import of a file no target declares now FAILs**
   (2026-08-04). The other half of H1, and the last known stale-PASS
   path. `undeclared_imports` already resolved these files and skipped

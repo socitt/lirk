@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from lirk.actions import (
@@ -52,6 +52,13 @@ def _load_graph(root: Path) -> tuple[Graph, list[str]] | None:
         order = topological_sort(graph)
     except (ConfigError, GraphError) as e:
         print(f"lirk: {e}", file=sys.stderr)
+        # Naming the root here is the difference between a legible error
+        # and a wild goose chase. A `//` label means nothing without it:
+        # run from a package subdirectory with no marker in sight and
+        # that package silently becomes the root, so the failure reads
+        # as "dependency //orrery:orrery does not exist" when the real
+        # fault is that //orrery is no longer inside the repo.
+        print(f"lirk: repo root is {root}", file=sys.stderr)
         return None
     return graph, order
 
@@ -66,6 +73,10 @@ class ExecutionSummary:
     tests_failed: int = 0
     tests_cached: int = 0
     tests_skipped: int = 0
+    # Labels that actually FAILed, in the order reported. Skipped
+    # dependents are deliberately not in here: they are consequences,
+    # and listing them buries the labels worth acting on.
+    failures: list[str] = field(default_factory=list)
 
     @property
     def tests_total(self) -> int:
@@ -124,6 +135,7 @@ def _execute(
         ok = False
         failed.add(label)
         summary.failed += 1
+        summary.failures.append(label)
         if mode == "test" and target.type == "test":
             summary.tests_failed += 1
         print(
@@ -201,6 +213,7 @@ def _execute(
             ok = False
             failed.add(label)
             summary.failed += 1
+            summary.failures.append(label)
             if is_test:
                 summary.tests_failed += 1
             print(f"  {verb:6} {label}: {result.message}", flush=True)
@@ -210,6 +223,23 @@ def _execute(
 
     save_cache(cache_path, cache)
     return ok, summary
+
+
+def _print_failures(summary: ExecutionSummary) -> None:
+    """Restate which targets failed, just above the counts.
+
+    Not a summarizing layer over test output (a settled non-goal): this
+    reprints labels lirk itself already printed and touches nothing about
+    the captured stdout/stderr. It exists because the per-target FAIL
+    line scrolls off above a unittest traceback, leaving a counts-only
+    summary on screen -- on a phone terminal, recovering a label you
+    already saw means scrolling back through the whole dump.
+    """
+    if not summary.failures:
+        return
+    print("lirk: failed:")
+    for label in summary.failures:
+        print(f"  {label}")
 
 
 def cmd_build(root: Path, label: str, force: bool = False) -> int:
@@ -224,12 +254,14 @@ def cmd_build(root: Path, label: str, force: bool = False) -> int:
         roots = {label}
     else:
         print(f"lirk: unknown target: {label}", file=sys.stderr)
+        print(f"lirk: repo root is {root}", file=sys.stderr)
         return 1
 
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
 
     ok, summary = _execute(root, graph, subset_order, mode="build", force=force)
+    _print_failures(summary)
     print(
         f"lirk: {summary.built} built, {summary.cached} cached, "
         f"{summary.failed} failed, {summary.skipped} skipped"
@@ -251,6 +283,7 @@ def cmd_test(root: Path, label: str, force: bool = False) -> int:
             return 0
     elif label not in graph.targets:
         print(f"lirk: unknown target: {label}", file=sys.stderr)
+        print(f"lirk: repo root is {root}", file=sys.stderr)
         return 1
     elif graph.targets[label].type != "test":
         print(
@@ -265,14 +298,47 @@ def cmd_test(root: Path, label: str, force: bool = False) -> int:
     subset_order = [l for l in order if l in closure]
 
     ok, summary = _execute(root, graph, subset_order, mode="test", force=force)
+    _print_failures(summary)
     passed = summary.tests_passed + summary.tests_cached
     print(f"lirk: {passed}/{summary.tests_total} tests passed")
     print("lirk: OK" if ok else "lirk: FAILED")
     return 0 if ok else 1
 
 
+class _VersionAction(argparse.Action):
+    """`--version`, with the lookup deferred until it's actually asked for.
+
+    argparse's built-in version action needs the string up front, which
+    would import importlib.metadata and stat the installed distribution
+    on every single invocation. Startup cost is already the dominant
+    per-invocation expense (DESIGN.md S6), so it isn't paid for a flag
+    almost no run uses.
+    """
+
+    def __init__(self, option_strings, dest, **kwargs):
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            print(f"lirk {version('lirk')}")
+        except PackageNotFoundError:
+            # Running from a checkout via bin/lirk rather than an
+            # install. Saying so beats printing a version that would be
+            # a guess about which source tree is in use.
+            print("lirk (not installed; running from a source checkout)")
+        parser.exit()
+
+
 def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lirk")
+    # On the top-level parser, so `lirk --version` works without naming
+    # a subcommand -- the subparser is required, and the whole point of
+    # the flag is that it answers before you know what you're running.
+    parser.add_argument(
+        "--version", action=_VersionAction, help="print the installed version and exit"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     root_help = (
@@ -298,7 +364,22 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
 
     args = parser.parse_args(argv)
     if root is None:
-        root = args.root if args.root is not None else _discover_root(Path.cwd())
+        if args.root is not None:
+            root = args.root
+        else:
+            root = _discover_root(Path.cwd())
+            if not (root / ROOT_MARKER).is_file():
+                # Announced, not silent: without a marker, `//` means
+                # whatever directory you happen to be standing in, and
+                # from the repo root that looks identical to working
+                # correctly. The failure it produces one directory down
+                # points at a dependency, never at the root -- which has
+                # now confused two separate projects.
+                print(
+                    f"lirk: no {ROOT_MARKER} found in any parent directory; "
+                    f"using the current directory as the repo root: {root}",
+                    file=sys.stderr,
+                )
 
     if args.command == "build":
         return cmd_build(root, args.label, force=args.force)

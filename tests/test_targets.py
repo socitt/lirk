@@ -162,6 +162,47 @@ class ParseBuildFileTests(unittest.TestCase):
         [target] = parse_build_file(path, package="pkg")
         self.assertEqual(target.srcs, ())
 
+    def test_non_py_src_raises_config_error(self):
+        # Left to ast.parse, whether a text file is caught depends on
+        # what it says -- so this is checked by extension, at parse time.
+        path = self._write(
+            """
+            [[target]]
+            name = "x"
+            type = "library"
+            srcs = ["notes.txt"]
+            """
+        )
+        with self.assertRaisesRegex(ConfigError, "not a .py file"):
+            parse_build_file(path, package="pkg")
+
+    def test_the_non_py_message_points_at_data(self):
+        # The whole value of catching this early is steering the reader
+        # to the field that does exist for non-source inputs.
+        path = self._write(
+            """
+            [[target]]
+            name = "x"
+            type = "library"
+            srcs = ["fixture.json"]
+            """
+        )
+        with self.assertRaisesRegex(ConfigError, "'data'"):
+            parse_build_file(path, package="pkg")
+
+    def test_non_py_files_are_still_fine_as_data(self):
+        path = self._write(
+            """
+            [[target]]
+            name = "x"
+            type = "library"
+            srcs = ["x.py"]
+            data = ["notes.txt", "fixtures"]
+            """
+        )
+        [target] = parse_build_file(path, package="pkg")
+        self.assertEqual(target.data, ("notes.txt", "fixtures"))
+
     def test_unknown_key_raises_config_error(self):
         path = self._write(
             """

@@ -330,11 +330,11 @@ deps = [":parser"]
 data = ["testdata"]
 ```
 
-Getting this wrong fails in two directions. A non-Python file in
-`srcs` gets a bogus syntax error:
+Getting this wrong fails in two directions. A non-`.py` file in `srcs`
+is rejected outright, before anything is built:
 
 ```
-  FAIL   //greeting:greeting: fixture.txt: syntax error: invalid syntax (fixture.txt, line 1)
+lirk: greeting/BUILD.lirk (target #1): src 'fixture.txt' is not a .py file -- every src is parsed as Python; declare fixtures and other non-source inputs as 'data' instead
 ```
 
 Leaving it undeclared entirely is worse and silent: edits to it never
@@ -342,6 +342,72 @@ invalidate anything, so you get a cached PASS against inputs that
 changed. A `data` entry may name a **directory**, fingerprinted
 recursively — prefer that over listing files by hand, which goes stale
 the first time someone adds a file and forgets.
+
+### Covering your entry point
+
+lirk has no `binary` target type and no `lirk run` — deliberately. A
+`test` target that subprocesses your entry point covers the same
+ground, and this is the pattern that replaces them, so it's worth
+writing early.
+
+Without it, nothing checks that your application starts at all. A real
+project shipped a `main()` that was defined and never called: `python3
+-m cli.render` did nothing whatsoever, while `lirk build //...`
+reported OK throughout. Every library was fine; the one artifact the
+repo existed to produce was the one thing lirk had no opinion about.
+
+Give the entry point a self-test path:
+
+```python
+# cli/render.py
+def main(argv=None):
+    ...
+
+if __name__ == "__main__":
+    import sys
+    if "--selftest" in sys.argv:
+        print("render: ok")
+        raise SystemExit(0)
+    raise SystemExit(main())
+```
+
+and a test target that runs the real thing as a subprocess:
+
+```python
+# cli/test_render.py
+import subprocess
+import sys
+import unittest
+
+
+class EntryPointTest(unittest.TestCase):
+    def test_entry_point_starts_exits_clean_and_prints(self):
+        proc = subprocess.run(
+            [sys.executable, "-m", "cli.render", "--selftest"],
+            capture_output=True, text=True, timeout=30,
+        )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(proc.stdout.strip(), "entry point produced no output")
+```
+
+```toml
+[[target]]
+name = "render_test"
+type = "test"
+srcs = ["test_render.py"]
+deps = [":render"]
+```
+
+Assert all three things — that it starts, that it exits 0, and that it
+produced output. Exit code alone passes for a program whose `main()` is
+never called, which is exactly the failure this is for.
+
+`python3 -m cli.render` resolves because lirk puts your repo root on
+`PYTHONPATH` (see [Getting the imports right](#getting-the-imports-right)),
+so the subprocess finds the package the same way your tests do. Keep
+the `timeout=` — lirk's own test timeout can only kill its direct
+child, so a wedged grandchild is yours to bound.
 
 ### Excluding directories that aren't yours
 
@@ -382,6 +448,7 @@ The entire CLI is two subcommands:
 | `--rebuild` | `build` | Alias for `--force`. |
 | `--rerun` | `test` | Alias for `--force`. |
 | `--root <path>` | both | Use this repo root, overriding `.lirk-root` discovery entirely. |
+| `--version` | neither | Print the installed version and exit. Takes no subcommand. |
 
 Labels:
 
@@ -407,6 +474,21 @@ One line per target, in dependency order:
 | `FAIL   <label>: <reason>` | Failed, with the raw test output printed beneath. |
 | `SKIP   <label>: dependency <dep> failed` | Not attempted, because something it depends on failed. |
 
+If anything failed, the labels that failed are listed again just above
+the summary, so you don't have to scroll back through a traceback to
+find one you already saw:
+
+```
+lirk: failed:
+  //greeting:greeting_test
+lirk: 0/1 tests passed
+lirk: FAILED
+```
+
+`SKIP`ped targets are not in that list — they're consequences of
+someone else's failure, and the label worth acting on is the one that
+actually broke.
+
 Then a summary and `lirk: OK` or `lirk: FAILED`. Exit status is **0**
 on OK, **1** on any failure or usage error.
 
@@ -426,8 +508,16 @@ what `unittest` printed.
 **`lirk: //:app: dependency '//greeting:greeting' does not exist`, and
 the target obviously does exist.** You're in a subdirectory and there's
 no `.lirk-root` above you, so lirk took the subdirectory as the repo
-root and can't see anything outside it. Create the marker at your real
-root, or pass `--root`.
+root and can't see anything outside it. Check the `lirk: repo root is
+...` line printed just beneath the error — if it isn't your real root,
+that's the whole problem. Create the marker at your real root, or pass
+`--root`.
+
+**`lirk: no .lirk-root found in any parent directory; using the current
+directory as the repo root: ...`.** Not an error — lirk is telling you
+what `//` means for this run. If the named directory is your repo root,
+create an empty `.lirk-root` there and the note goes away. If it isn't,
+every `//` label in this run meant the wrong thing.
 
 **`lirk: unknown target: //app`.** A label needs both parts —
 `//package:name`. `//app` names no target. The same message appears for

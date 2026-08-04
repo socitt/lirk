@@ -127,6 +127,22 @@ def _parse_target(raw: dict, path: Path, package: str, index: int) -> Target:
     deps = _string_list(raw.get("deps", []), "deps", where)
     data = _string_list(raw.get("data", []), "data", where)
 
+    # Every src is parsed as Python, so a non-.py src is a declaration
+    # error rather than something to discover at build time. Catching it
+    # by extension is what makes the srcs/data split self-teaching: left
+    # to `ast.parse`, whether a text file is caught depends on what it
+    # says -- "a rough note" is a syntax error, "hello" parses fine and
+    # sails through into srcs, where every consumer assumes it's
+    # importable. This cannot catch a *mislabelled* file (a binary named
+    # .py), which is why validate_target still guards decoding.
+    for src in srcs:
+        if not src.endswith(".py"):
+            raise ConfigError(
+                f"{where}: src {src!r} is not a .py file -- every src is "
+                "parsed as Python; declare fixtures and other non-source "
+                "inputs as 'data' instead"
+            )
+
     if type_ == "test" and not srcs:
         raise ConfigError(f"{where}: a 'test' target must declare at least one src")
 

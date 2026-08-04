@@ -103,9 +103,16 @@ A `test` target with **no srcs** is also rejected: the run loop would
 otherwise spawn nothing and report a pass.
 
 `data` entries are fingerprinted exactly like `srcs` but never
-`ast.parse`d — that's the whole reason the field exists. A `.txt`
-fixture in `srcs` produces a bogus syntax error; the same file left
-undeclared entirely means edits to it never invalidate anything.
+`ast.parse`d — that's the whole reason the field exists. `srcs` is
+restricted to `.py` **by extension, at parse time**, so the split is
+self-teaching rather than something you discover later: left to
+`ast.parse`, whether a stray text file is caught depends on what it
+says — a sentence is a syntax error, `hello` parses fine and sails
+through into `srcs`, where every consumer assumes it is importable.
+The extension check cannot catch a *mislabelled* file (a PNG named
+`.py`), which is why `validate_target` still guards decoding. A file
+left undeclared entirely is the silent case: edits to it never
+invalidate anything.
 
 A `data` entry may name a **directory**, fingerprinted recursively.
 This is not a convenience: a hand-maintained file list is the failure
@@ -139,11 +146,24 @@ path**, not just "a cycle exists".
 ### Repo root discovery
 
 `--root <path>` > `.lirk-root` marker in the nearest ancestor of cwd >
-cwd itself. The marker is opt-in; without it lirk silently scopes to
-the invocation directory, which makes out-of-scope targets look
-*missing* rather than out of scope. The marker was chosen over a
-"nearest `BUILD.lirk`" heuristic because a package's own build file is
-not a reliable repo-root signal.
+cwd itself. The marker is opt-in; without it lirk scopes to the
+invocation directory, which makes out-of-scope targets look *missing*
+rather than out of scope. The marker was chosen over a "nearest
+`BUILD.lirk`" heuristic because a package's own build file is not a
+reliable repo-root signal.
+
+**The cwd fallback announces itself, and errors name the root.** The
+fallback is legitimate, but it used to be invisible, which meant `//`
+silently changed meaning with the directory you happened to be standing
+in. From the repo root that is indistinguishable from working; one
+directory down it produces `//:cli: dependency '//orrery:orrery' does
+not exist` — an error about the dep, when the fault is that the root
+moved. So `main` prints a stderr note when no marker is found, and
+graph errors and unknown-target errors both print `lirk: repo root is
+<path>`. The note is suppressed when a marker *is* found or `--root` is
+given, since a warning about an implicit choice is noise once the
+choice is explicit. This had confused two separate projects before it
+was fixed.
 
 The **downward** scan (`find_build_files`) skips any `BUILD.lirk` under
 a dot-prefixed directory, checked relative to root. Without that, a
@@ -446,6 +466,17 @@ subprocess.run(
 Two independent assessments identified this as a practical strength.
 Resist adding an interpreting layer.
 
+**A failing run does restate which labels failed**, immediately above
+the counts (`_print_failures`). This is not the interpreting layer
+ruled out above: it reprints labels lirk itself already printed and
+touches nothing about the captured output. It exists because the
+per-target `FAIL` line scrolls off above a unittest traceback, leaving
+a counts-only summary on screen — on a phone terminal, recovering a
+label you already saw means scrolling back through the whole dump.
+Targets reported `SKIP` are deliberately excluded: they are
+consequences of someone else's failure, and listing them buries the
+labels worth acting on.
+
 ---
 
 ## 6. Deliberate scope constraints
@@ -502,7 +533,10 @@ Recorded so a later session doesn't relitigate them:
   test subprocesses still costs ~2.70s, and `import lirk.cli` alone
   accounts for ~2.56s of it. It doesn't scale with test count. Cutting
   it means hand-rolling replacements for stdlib modules — a bad trade
-  at v1.
+  at v1. It does mean **new imports are not added to the startup path
+  for the sake of a rare flag**: `--version` uses a custom argparse
+  action so `importlib.metadata` is imported only when the flag is
+  actually passed, rather than on every invocation.
 
 ---
 

@@ -26,7 +26,11 @@ deps = [":mylib"]
 - **`type`** — required, one of `"library"` or `"test"` (v1 scope
   only).
 - **`srcs`** — list of source file paths relative to the package
-  directory. Defaults to `[]`.
+  directory. Defaults to `[]`. **Must be `.py` files** — every src is
+  parsed as Python, so anything else is rejected when the BUILD file is
+  parsed, with a message pointing at `data`. (A file that is *named*
+  `.py` but isn't Python is caught later, at build time, as "not
+  readable as Python source".)
 - **`deps`** — list of target labels this target depends on. Defaults
   to `[]`. Label resolution (`//path:name` vs `:name`) happens when
   the dependency graph is built across all packages, not at parse

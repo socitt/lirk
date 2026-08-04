@@ -146,10 +146,11 @@ resolve `//`-prefixed labels. By default it uses the current
 directory, walking upward for a `.lirk-root` marker file first — drop
 an empty `.lirk-root` at your repo's top level and `lirk build`/`lirk
 test` will find it correctly even when run from a subdirectory.
-Without the marker, lirk silently scopes to whatever directory it was
-invoked from, which can make targets outside that subtree look
-"missing" rather than out of scope. `--root <path>` overrides
-discovery entirely.
+Without the marker, lirk scopes to whatever directory it was invoked
+from, which can make targets outside that subtree look "missing" rather
+than out of scope — so it says so, naming the directory it chose, and
+every graph or unknown-target error prints the root it resolved
+against. `--root <path>` overrides discovery entirely.
 
 ## Status
 
