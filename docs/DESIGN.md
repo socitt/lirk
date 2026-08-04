@@ -231,9 +231,10 @@ load-bearing.
 
 ### Imports are checked against `deps`
 
-Building a target also fails it if a src imports a module owned by a
-target outside its dependency closure. Added 2026-08-03; it is what
-stops `deps` from being decoration.
+Building a target also fails it if a src imports a repo module that is
+outside its dependency closure — either owned by a target it doesn't
+depend on, or declared by no target at all. Added 2026-08-03; it is
+what stops `deps` from being decoration.
 
 The reason it is a correctness check rather than hygiene: targets
 execute with the repo root importable (§5), so Python resolves a
@@ -253,12 +254,37 @@ Four decisions inside it, none of them free:
   "direct deps only" rule buys no additional correctness here and would
   reject lirk's own BUILD files, which lean on transitive edges
   deliberately.
-- **A file no target declares is not reported.** It is a real
-  unfingerprinted input and it belongs to the same family, but firing
-  on it would reject ordinary repos — an undeclared package
-  `__init__.py` is common, including in lirk's own fixtures. Tracked
-  separately as TASKS.md H2 — it is the same severity, but the fix is
-  a different one (fingerprint the file, don't reject the import).
+- **A file no target declares is reported too**, with a different
+  message: `imports 'orphan.thing' -- no target declares
+  orphan/thing.py`. There is no owning target to name, and that is the
+  defect — nobody fingerprints it. The two messages must stay distinct
+  because the fixes differ: add a `deps` entry, versus declare the file
+  in some target's `srcs`.
+
+  Rejecting was chosen over fingerprinting the file implicitly (the
+  alternative considered for TASKS.md H2). Implicit fingerprinting is
+  silent and costs adopters nothing, but it makes the graph partly
+  implicit, and it needs a transitive walk over undeclared files —
+  orphan A importing orphan B means folding in A alone still leaves B
+  unfingerprinted. Rejecting gets that transitivity by construction:
+  once B must be declared, whatever B imports falls under the rule
+  above. It also keeps fingerprinting free of `ast`, which implicit
+  folding would require on every run, including fully cached ones.
+
+  The concern that this would reject ordinary repos was measured before
+  landing rather than assumed: across `terminal-projects` (66 targets),
+  lirk itself (13) and `termrery` (4), **zero** imports resolve to an
+  undeclared file. One fixture did — `rootimport_repo`'s empty
+  `pkg/__init__.py` — and declaring it is the same thing lirk's own
+  `lirk/BUILD.lirk` already does with its `:init` target.
+
+- **Ancestor package inits are still not checked.** `_resolve_module`
+  resolves a dotted path to one file and does not also collect the
+  `__init__.py` of each package along the way, so `import a.b.c` never
+  looks at `a/__init__.py`. An undeclared one there remains an
+  unfingerprinted input. Left deliberately: it resolved to nothing
+  across all three repos, and collecting ancestors turns one clear
+  error into several. See TASKS.md.
 - **Resolution mirrors the runner**, not Python's full import system:
   the target's package directory (`sys.path[0]` under `cwd=pkg_dir`)
   then the repo root (`PYTHONPATH`). Anything resolving outside the
@@ -320,9 +346,10 @@ Consequences worth stating explicitly:
   forever. This fired silently twice before the constant existed —
   once when `ast.parse` validation was added, once when the test
   subprocess environment changed. **Bump it in the same commit as any
-  change to `validate_target` or `run_test` behavior.** Currently `9`
-  — the last bump was the import check, which changes what a passing
-  build means, so caches written before it must not be trusted.
+  change to `validate_target` or `run_test` behavior.** Currently `10`
+  — the last bump extended the import check to files no target
+  declares, which changes what a passing build means, so caches written
+  before it must not be trusted.
 - **Content hashing, not mtimes.** Immune to `touch`, to fresh
   checkouts, to clock skew, and to iSH-AOK's questionable time
   accounting (observed reporting `user 24m40s` for a 42s run). A whole

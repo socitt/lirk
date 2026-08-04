@@ -170,14 +170,32 @@ class ImportCheckTests(unittest.TestCase):
 
         self.assertTrue(result.ok, result.message)
 
-    def test_import_of_a_file_no_target_declares_is_not_reported(self):
-        # orphan/thing.py exists and is undeclared. That is a real
-        # unfingerprinted input (TASKS.md H2), but reporting it here
-        # would reject ordinary repos -- an undeclared package
-        # __init__.py is common, including in these fixtures.
+    def test_import_of_a_file_no_target_declares_fails(self):
+        # orphan/thing.py exists and no target declares it, so nothing
+        # fingerprints it -- editing it left orphan_user `cached` and
+        # green while --force FAILed (TASKS.md H2). Rejected rather than
+        # fingerprinted implicitly, which keeps the graph explicit.
         result = self._validate("//leaf:orphan_user")
 
-        self.assertTrue(result.ok, result.message)
+        self.assertFalse(result.ok)
+        # Names the file to declare, not a target -- there is no owning
+        # target to name, which is the whole defect.
+        self.assertIn("orphan_user.py", result.message)
+        self.assertIn("orphan.thing", result.message)
+        self.assertIn("orphan/thing.py", result.message)
+
+    def test_the_two_undeclared_kinds_report_differently(self):
+        # An import owned by an out-of-closure target is fixed by adding
+        # a dep; one owned by nobody is fixed by declaring the file. The
+        # messages must not be interchangeable, or the reader is sent to
+        # edit the wrong line.
+        owned = self._validate("//leaf:undeclared").message
+        orphaned = self._validate("//leaf:orphan_user").message
+
+        self.assertIn("not in deps", owned)
+        self.assertNotIn("not in deps", orphaned)
+        self.assertIn("no target declares", orphaned)
+        self.assertNotIn("no target declares", owned)
 
     def test_check_is_skipped_without_repo_context(self):
         # validate_target(target, root) with no env still means "syntax

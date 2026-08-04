@@ -49,8 +49,22 @@ deps = [":mylib"]
 
   Checked against the **transitive closure**, so an import satisfied by
   a dep-of-a-dep is fine; the fingerprint covers it either way.
-  Imports of the stdlib, of installed packages, and of files under the
-  repo root that no target declares as a src are not reported.
+  Imports of the stdlib and of installed packages are not reported —
+  anything resolving outside the repo is not lirk's business.
+
+  **A file under the repo that no target declares is also rejected**,
+  with a different message, because nothing fingerprints it either:
+
+  ```
+  FAIL //leaf:orphan_user: orphan_user.py imports 'orphan.thing' -- no target declares orphan/thing.py
+  ```
+
+  Here the fix is to add the file to some target's `srcs` and depend on
+  that target, rather than to add a `deps` entry. This includes an
+  `__init__.py`: `from pkg import thing` imports `pkg` as well as
+  `pkg.thing`, so if `pkg/__init__.py` exists it is a real input and
+  needs declaring. Packages with no `__init__.py` at all (PEP 420
+  namespace packages) are unaffected.
 - **`data`** — list of paths relative to the package directory, for
   things the target depends on that are not Python source (e.g. a
   `.txt` fixture read at runtime). Defaults to `[]`. Fingerprinted the

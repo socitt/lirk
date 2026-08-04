@@ -1,7 +1,10 @@
+# __init__.py is declared, not left orphaned: `from pkg.thing import
+# value` imports `pkg` as well as `pkg.thing`, so the init file is a
+# real input to this target and must be fingerprinted like any other.
 [[target]]
 name = "thing"
 type = "library"
-srcs = ["thing.py"]
+srcs = ["__init__.py", "thing.py"]
 
 [[target]]
 name = "thing_test"

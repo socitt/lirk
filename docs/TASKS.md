@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-08-03): 127 tests, `python3 -m
+Last verified against source (2026-08-04): 130 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
 `lirk build //...` (13 targets) and `lirk test //...` (5 test targets)
 — which runs alongside the unittest invocation rather than replacing
@@ -106,8 +106,8 @@ Honest caveats on this one:
   though, both found the moment a new repo was added, was the argument
   that "configuration gap" was carrying more weight than it should.
   **The engine now detects it** (H1, closed 2026-08-03), which is the
-  better answer than continuing to rule on it. H2 is the remaining
-  member of the family.
+  better answer than continuing to rule on it. H2, the other member of
+  the family, is closed too (2026-08-04).
 
 Worth recording honestly: self-hosting immediately produced a
 cache-correctness bug of exactly the shape this criterion forbids — a
@@ -158,39 +158,8 @@ are given inline so no one has to take the source repo's word for it.
 
 ### HIGH
 
-**H2 — a `.py` file no target declares is an unfingerprinted input.**
-H1 closed the case where the imported file belongs to an *undeclared
-target*. This is the remaining half: a file under the repo that no
-target lists in `srcs` at all. Nothing fingerprints it, so editing it
-invalidates nothing, and the import check deliberately stays silent
-(rejecting it would fail ordinary repos — an undeclared package
-`__init__.py` is extremely common, including in lirk's own fixtures).
-
-Reproduced against current source, with the import check in place:
-
-```
-$ lirk test //leaf:orphan_test      # imports orphan.thing; no target declares orphan/thing.py
-  PASS   //leaf:orphan_test
-$ vi orphan/thing.py                # change the value the test asserts on
-$ lirk test //leaf:orphan_test
-  cached  //leaf:orphan_test
-lirk: 1/1 tests passed              # <-- wrong
-$ lirk test //leaf:orphan_test --force
-lirk: 0/1 tests passed
-```
-
-Same severity as H1 and the same failure shape; what differs is the
-fix. Rejecting the import is not available, so the options are to fold
-the resolved file's contents into the importing target's fingerprint as
-an implicit input (correct, silent, and makes the graph partly
-implicit), or to require every imported repo file to be declared
-somewhere (explicit, and a much harder adoption story). Undecided, and
-worth deciding before it's implemented.
-
-Narrower than H1 in practice — it needs a file outside every target,
-where H1 needed only a missing `deps` line — but it is not rare: an
-`__init__.py` that no BUILD file mentions is the ordinary case, and
-editing one currently invalidates nothing that imports it.
+*None. H1 and H2 are both closed — see Recently closed. No known
+stale-PASS path remains open.*
 
 ### MEDIUM
 
@@ -281,6 +250,20 @@ new failure mode of its own (a stale lock after a crash — and iSH-AOK
 crashing is the environment this tool exists for). Not worth it unless
 concurrent runs actually become a workflow.
 
+**L7 — an undeclared *ancestor* `__init__.py` is still unfingerprinted.**
+The residual sliver of H2. `_resolve_module` resolves a dotted path to
+one file and does not also collect the `__init__.py` of each package
+along the way, so `import a.b.c` never looks at `a/__init__.py`; if no
+target declares that file, editing it invalidates nothing. Same
+stale-PASS shape as H2, two steps further out.
+
+Left open deliberately rather than folded into the H2 fix, on evidence:
+zero imports across `terminal-projects` (66 targets), lirk (13) and
+`termrery` (4) resolve to an undeclared ancestor init. Collecting
+ancestors also turns one clear error into several, which is the reason
+`_resolve_module` doesn't do it. Worth doing if a repo ever hits it;
+not worth the message noise before that.
+
 **L6 — `lirk --version` isn't a flag.** `main`'s parser requires a
 subcommand, so `lirk --version` errors with the subcommand usage and
 `pip show lirk` is the workaround. One `parser.add_argument("--version",
@@ -327,16 +310,14 @@ status. *What's left:* paste the issue link in.
 
 ## Next actions, in priority order
 
-**All three v1 criteria hold, and v1 is to be tagged once the
-high-priority correctness work is done** (decided 2026-08-03: fix
-first, tag after — tagging v1 with a known silent-wrong-pass path open
-is the thing the criteria exist to prevent). H1 is closed; **H2 is what
-now stands between here and the tag.**
+**All three v1 criteria hold and the high-priority correctness work is
+done, so v1 is ready to tag** (decided 2026-08-03: fix first, tag after
+— tagging v1 with a known silent-wrong-pass path open is the thing the
+criteria exist to prevent). H1 and H2 are both closed, and **no known
+stale-PASS path remains open.**
 
-1. **H2 — undeclared files as unfingerprinted inputs.** The last known
-   stale-PASS path. Needs its fix chosen first: implicit fingerprinting
-   of imported-but-undeclared files, or requiring them to be declared.
-   Unlike H1, rejecting is not an option.
+1. **Tag v1.** Nothing blocks it. Everything below is post-tag polish,
+   and none of it changes what a passing build means.
 2. **M4 — name the root.** Two small, independent changes (announce the
    cwd fallback; put the root in unresolved-`//`-label errors) against
    a failure that has now confused two separate projects.
@@ -347,11 +328,53 @@ now stands between here and the tag.**
 5. **M5** is D4 — no engine work.
 6. **D2**, whenever convenient — needs the upstream issue URL, which is
    not derivable from the repo.
+7. **L7**, only if a real repo hits it.
 
-Apart from the half of L3 deliberately left (see above), everything
-open came out of the termrery trial or the H1 work it prompted.
+Apart from the half of L3 and the sliver of L7 deliberately left (see
+above), everything open came out of the termrery trial or the H1 work
+it prompted.
 
 ## Recently closed
+
+- **H2 — an import of a file no target declares now FAILs**
+  (2026-08-04). The other half of H1, and the last known stale-PASS
+  path. `undeclared_imports` already resolved these files and skipped
+  them when no target owned them; it now reports them with a distinct
+  message, since the fix differs — declare the file, rather than add a
+  `deps` entry:
+
+  ```
+    FAIL   //leaf:orphan_user: orphan_user.py imports 'orphan.thing' -- no target declares orphan/thing.py
+  ```
+
+  **Rejecting, not implicit fingerprinting.** Both options closed the
+  stale PASS; rejecting won on three counts. It keeps the graph fully
+  explicit rather than half-inferred. It gets transitivity for free —
+  implicit folding would need a walk over the undeclared-file import
+  graph, since orphan A importing orphan B leaves B unfingerprinted
+  otherwise. And it keeps `compute_fingerprints` free of `ast`, which
+  implicit folding would have required on every run, including fully
+  cached ones where the parse is currently skipped entirely.
+
+  **The recorded objection was measured, not assumed.** This item said
+  rejecting "would fail ordinary repos — an undeclared `__init__.py` is
+  extremely common". Checked before landing, by resolving every import
+  in every declared src exactly as `undeclared_imports` does:
+  `terminal-projects` (66 targets), lirk itself (13) and `termrery` (4)
+  produce **zero** imports resolving to an undeclared file — 83 targets,
+  no false positives, the same result H1 got. The exposure is also
+  narrower than assumed, because `_resolve_module` doesn't collect
+  ancestor package inits, so only `from pkg import ...` can reach one.
+  Exactly one fixture hit it, `rootimport_repo`'s empty
+  `pkg/__init__.py`, now declared — which is what `lirk/BUILD.lirk`
+  already does with its own `:init` target.
+
+  `ACTION_VERSION` 9 → 10: a prior green was computed under rules that
+  permitted this. Residual sliver tracked as L7. Fixture: `import_repo`
+  already carried `orphan_user.py`; its assertion is inverted, and a CLI
+  test declares the orphaned file on a writable copy to prove the
+  documented fix works end to end — without that, a check that rejected
+  every unowned import would look correct. Suite 127 → 130.
 
 - **H1 — `deps` is now checked against real imports** (2026-08-03).
   After every src parses, the `Import`/`ImportFrom` nodes of the trees

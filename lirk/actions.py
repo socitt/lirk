@@ -171,11 +171,20 @@ def undeclared_imports(
     additional correctness here, and would reject lirk's own BUILD
     files.
 
-    A file no target declares is *not* reported. It is the same family
-    of stale input, but it belongs to a different fix (see docs/TASKS.md
-    H2) and firing here would reject ordinary repos: a package
-    `__init__.py` that no target lists as a src is common, including in
-    lirk's own fixtures.
+    An import resolving to a repo file that *no* target declares is
+    reported too, for the same reason and with a different message: an
+    undeclared file is fingerprinted by nobody, so it is the same stale
+    input with no owner to name. Rejecting rather than fingerprinting it
+    implicitly keeps the graph fully explicit, and gets transitivity for
+    free -- once the file must be declared, whatever *it* imports falls
+    under the rule above (docs/TASKS.md H2).
+
+    Only the module the dotted path resolves to is checked, not the
+    `__init__.py` of each package along the way (see _resolve_module).
+    An undeclared *ancestor* package init is therefore still an
+    unfingerprinted input; it resolved to nothing across all three real
+    repos, and collecting ancestors would turn one clear error into
+    several.
     """
     pkg_dir = root / target.package
     root_resolved = root.resolve()
@@ -193,12 +202,18 @@ def undeclared_imports(
             if not found.is_relative_to(root_resolved):
                 continue
             owner = env.owners.get(found)
-            if owner is None or owner in env.allowed:
+            if owner is not None and owner in env.allowed:
                 continue
             if (src, dotted) in seen:
                 continue
             seen.add((src, dotted))
-            problems.append(f"{src} imports '{dotted}' ({owner}), not in deps")
+            if owner is None:
+                rel = found.relative_to(root_resolved).as_posix()
+                problems.append(
+                    f"{src} imports '{dotted}' -- no target declares {rel}"
+                )
+            else:
+                problems.append(f"{src} imports '{dotted}' ({owner}), not in deps")
 
     return problems
 

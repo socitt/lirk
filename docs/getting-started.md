@@ -284,8 +284,23 @@ nothing. You get a `cached` PASS against changed code. Declaring the
 edge is what makes the cache trustworthy.
 
 A dep-of-a-dep counts, so you don't have to list every package you
-reach transitively. The stdlib, installed packages, and files under
-your repo that no target declares are all ignored.
+reach transitively. The stdlib and installed packages are ignored —
+anything outside your repo isn't lirk's business.
+
+**Importing a file of your own that no target declares fails too**, for
+the same reason and with a different message:
+
+```
+  FAIL   //leaf:orphan_user: orphan_user.py imports 'orphan.thing' -- no target declares orphan/thing.py
+```
+
+Nothing fingerprints a file no target lists, so editing it invalidates
+nothing — the same stale `cached` PASS, with no target to name. The fix
+is to put the file in some target's `srcs` and depend on that target.
+Watch for `__init__.py` here: `from pkg import thing` imports `pkg`
+itself as well, so a non-empty `pkg/__init__.py` needs declaring. If
+you have no `__init__.py` at all, nothing changes — lirk resolves
+subdirectories as namespace packages (PEP 420).
 
 **The one trap: don't give a module the same name as its own package
 directory.** A file `greeting/greeting.py` shadows the package
@@ -439,6 +454,12 @@ that target's `deps`. If the import is genuinely wrong, delete it
 instead — but don't reach for a workaround: the check exists because an
 undeclared import silently escapes the fingerprint. See [Getting the
 imports right](#getting-the-imports-right).
+
+**`FAIL ...: orphan_user.py imports 'orphan.thing' -- no target
+declares orphan/thing.py`.** Same problem, one step further out: the
+imported file belongs to no target at all, so there is no label to add
+to `deps`. Declare the file in some target's `srcs` and depend on that
+target. Most often this is an `__init__.py` nobody listed.
 
 **`FAIL ...: fixture.txt: syntax error: invalid syntax`.** A
 non-Python file is in `srcs`. Move it to `data`.

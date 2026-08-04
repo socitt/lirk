@@ -127,13 +127,14 @@ expansion are on hold until *all three* v1 criteria hold:
 3. **Known issues clear** — no open entries beyond ones explicitly
    marked cosmetic-only. **Met.**
 
-All three now hold, and v1 will be tagged once the remaining
-high-priority correctness item is closed. The `termrery` trial found
-that `deps` was not checked against what a target actually imports, so
-an undeclared import both passed and cached a stale green; **that check
-now exists and fails the build** (2026-08-03). Its narrower sibling —
-a `.py` file no target declares at all is still an unfingerprinted
-input — is tracked as H2 and is the last known path of that kind.
+All three now hold and the high-priority correctness work is done, so
+v1 is ready to tag. The `termrery` trial found that `deps` was not
+checked against what a target actually imports, so an undeclared import
+both passed and cached a stale green; **that check now exists and fails
+the build** (2026-08-03). Its narrower sibling — a `.py` file that no
+target declares at all, which nothing fingerprints — **is also rejected
+now** (2026-08-04), after measuring across all three repos that no real
+target imports one. **No known stale-green path remains open.**
 
 These are deliberately non-subjective, replacing the vaguer "proven
 stable" language they grew out of. Current status is tracked in

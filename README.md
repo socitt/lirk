@@ -183,7 +183,8 @@ self-hosting" language with a concrete, non-subjective bar:
    repo, in any session. See [`docs/TASKS.md`](docs/TASKS.md) for the
    caveats. The third repo surfaced a cache-correctness path — an
    undeclared import cached a stale green — which is now detected and
-   failed at build time; its narrower sibling remains open as H2.
+   failed at build time, as is its narrower sibling, an import of a file
+   no target declares (2026-08-04). No known stale-green path is open.
 3. **`docs/KNOWN_ISSUES.md` clear.** No open entries beyond ones
    explicitly marked cosmetic-only. **Met** as of this writing (one
    entry on record, status: Fixed).

@@ -21,6 +21,43 @@ has the originals.
 
 ---
 
+## 2026-08-04
+
+- **H2 closed — the last known stale-PASS path.** Read the doc set to
+  pick up where the previous session left off; TASKS.md was unambiguous
+  that H2 was the only thing between here and the v1 tag, and that its
+  fix had to be *chosen* before being written.
+- **Measured the objection before deciding, rather than inheriting it.**
+  This item's own text said rejecting undeclared-file imports "would
+  fail ordinary repos — an undeclared `__init__.py` is extremely
+  common." Resolved every import in every declared src across all three
+  real repos the way `undeclared_imports` does: 83 targets, **zero**
+  hits. The claim was plausible and wrong, and it had been steering the
+  decision toward the more complex fix.
+- **Chose rejecting over implicit fingerprinting** (the user's call,
+  taken on that evidence). Rejecting keeps the graph explicit, gets
+  transitivity by construction — an orphan importing another orphan is
+  covered once the first must be declared — and keeps `ast` out of
+  `compute_fingerprints`, which implicit folding would have needed on
+  every run including fully cached ones.
+- The code change is small: the `owner is None` branch already existed
+  and `continue`d. It now reports, with a **distinct message** from
+  H1's — the fixes differ (declare the file vs. add a `deps` entry), so
+  a shared message would send the reader to the wrong line. A test
+  asserts the two messages don't overlap.
+- One fixture was genuinely affected — `rootimport_repo`'s empty
+  `pkg/__init__.py`, undeclared while `from pkg.thing import value`
+  imports `pkg` itself. Declared it, which is what `lirk/BUILD.lirk`
+  already does with its own `:init`.
+- **Left a sliver open honestly, as L7.** `_resolve_module` doesn't
+  collect ancestor package inits, so `import a.b.c` never checks
+  `a/__init__.py`. Measured that too: zero across the same 83 targets.
+  Not folded in, because collecting ancestors turns one clear error into
+  several — the reason `_resolve_module` was written that way.
+  `ACTION_VERSION` 9 → 10. Suite 127 → 130.
+- **Next: tag v1.** Nothing blocks it now. M4/M3/M6/L6/D4 are all small
+  and are post-tag polish; none changes what a passing build means.
+
 ## 2026-08-03
 
 - **The third repo arrived: `termrery`** (`/root/git/termrery`, review

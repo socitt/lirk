@@ -141,6 +141,34 @@ class ImportCheckWiringTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("base.base", out)
 
+    def test_build_fails_on_an_import_no_target_declares(self):
+        code, out = _run(["build", "//leaf:orphan_user"], self.root)
+
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL", out)
+        self.assertIn("orphan/thing.py", out)
+
+    def test_build_passes_once_the_orphaned_file_is_declared(self):
+        # The counterpart to the test above, on a writable copy: a check
+        # that rejected every unowned import would look correct without
+        # this. Declaring the file is the documented fix, so the fix has
+        # to actually work end to end.
+        (self.root / "orphan" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "thing"\ntype = "library"\nsrcs = ["thing.py"]\n'
+        )
+        build = self.root / "leaf" / "BUILD.lirk"
+        build.write_text(
+            build.read_text().replace(
+                'name = "orphan_user"\ntype = "library"\nsrcs = ["orphan_user.py"]',
+                'name = "orphan_user"\ntype = "library"\nsrcs = ["orphan_user.py"]\n'
+                'deps = ["//orphan:thing"]',
+            )
+        )
+
+        code, out = _run(["build", "//leaf:orphan_user"], self.root)
+
+        self.assertEqual(code, 0, out)
+
     def test_a_target_outside_the_requested_subset_still_owns_its_srcs(self):
         # The owner index is built from the whole graph, not the subset
         # being built: //base:base isn't in //leaf:undeclared's closure,
