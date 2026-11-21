@@ -193,12 +193,46 @@ def _resolve_module(dotted: str, bases: Sequence[Path]) -> Path | None:
     return None
 
 
+@dataclass(frozen=True)
+class ImportProblem:
+    """One import reaching outside a target's dep closure.
+
+    `owners` is empty when no target declares the imported file (`path`,
+    repo-relative); otherwise it names every target that does, none of
+    which is in the importer's closure.
+    """
+
+    src: str
+    dotted: str
+    path: str
+    owners: frozenset[str]
+
+    def message(self) -> str:
+        if not self.owners:
+            return f"{self.src} imports '{self.dotted}' -- no target declares {self.path}"
+        return (
+            f"{self.src} imports '{self.dotted}' "
+            f"({', '.join(sorted(self.owners))}), not in deps"
+        )
+
+
 def undeclared_imports(
     target: Target,
     root: Path,
     env: ImportEnv,
     parsed: Iterable[tuple[str, ast.AST]],
 ) -> list[str]:
+    """Imports reaching outside the dep closure, as messages; see
+    import_problems for the rule and its reasoning."""
+    return [p.message() for p in import_problems(target, root, env, parsed)]
+
+
+def import_problems(
+    target: Target,
+    root: Path,
+    env: ImportEnv,
+    parsed: Iterable[tuple[str, ast.AST]],
+) -> list[ImportProblem]:
     """Imports reaching a target outside this one's declared dep closure.
 
     This is what stops `deps` from being decoration. Because targets run
@@ -232,7 +266,7 @@ def undeclared_imports(
     """
     pkg_dir = root / target.package
     root_resolved = root.resolve()
-    problems: list[str] = []
+    problems: list[ImportProblem] = []
     seen: set[tuple[str, str]] = set()
 
     for src, tree in parsed:
@@ -251,16 +285,8 @@ def undeclared_imports(
             if (src, dotted) in seen:
                 continue
             seen.add((src, dotted))
-            if not owners:
-                rel = found.relative_to(root_resolved).as_posix()
-                problems.append(
-                    f"{src} imports '{dotted}' -- no target declares {rel}"
-                )
-            else:
-                problems.append(
-                    f"{src} imports '{dotted}' ({', '.join(sorted(owners))}), "
-                    "not in deps"
-                )
+            rel = found.relative_to(root_resolved).as_posix()
+            problems.append(ImportProblem(src, dotted, rel, owners))
 
     return problems
 
@@ -277,7 +303,6 @@ def validate_target(
     around it (unit tests do this); the CLI always supplies one, so the
     import check is not optional in a real run.
     """
-    pkg_dir = root / target.package
     missing = missing_files(target, root)
     if missing:
         return ActionResult(
@@ -291,13 +316,53 @@ def validate_target(
     # makes. Named relative to the package ("../conftest.py") so the
     # message points at the right file and undeclared_imports resolves
     # it from the package directory like any src.
+    parsed, error = _parse_sources(target, sources_to_parse(target, root))
+    if error is not None:
+        return error
+
+    if env is not None:
+        # Reuses the trees parsed above rather than re-reading the srcs:
+        # syntax validity is a precondition of the import check anyway,
+        # so a second parse would only be a second chance to disagree.
+        undeclared = undeclared_imports(target, root, env, parsed)
+        if undeclared:
+            return ActionResult(
+                target.label, False, "; ".join(undeclared)
+            )
+
+    return ActionResult(target.label, True, "ok")
+
+
+def parse_target(
+    target: Target, root: Path
+) -> tuple[list[tuple[str, ast.AST]], ActionResult | None]:
+    """Parse everything validate_target would, without the import check:
+    the (name, tree) pairs, or the failure that stopped parsing."""
+    missing = missing_files(target, root)
+    if missing:
+        return [], ActionResult(
+            target.label, False, f"missing source file(s): {', '.join(missing)}"
+        )
+    return _parse_sources(target, sources_to_parse(target, root))
+
+
+def sources_to_parse(target: Target, root: Path) -> list[tuple[str, Path]]:
+    """(name, path) of everything validate_target parses for `target`:
+    its srcs, plus a pytest target's conftest modules (see there)."""
+    pkg_dir = root / target.package
     to_parse = [(src, pkg_dir / src) for src in target.srcs]
     to_parse += [
         (os.path.relpath(path, pkg_dir.resolve()).replace(os.sep, "/"), path)
         for path in pytest_inputs(target, root)
         if path.name == "conftest.py"
     ]
+    return to_parse
 
+
+def _parse_sources(
+    target: Target, to_parse: Sequence[tuple[str, Path]]
+) -> tuple[list[tuple[str, ast.AST]], ActionResult | None]:
+    """Parse each (name, path); the trees, or the first failure."""
     parsed: list[tuple[str, ast.AST]] = []
     for src, src_path in to_parse:
         try:
@@ -311,26 +376,15 @@ def validate_target(
                 src_path.read_text(encoding="utf-8"), filename=str(src_path)
             )
         except SyntaxError as e:
-            return ActionResult(
+            return parsed, ActionResult(
                 target.label, False, f"{src}: syntax error: {e}"
             )
         except (UnicodeDecodeError, ValueError) as e:
-            return ActionResult(
+            return parsed, ActionResult(
                 target.label, False, f"{src}: not readable as Python source: {e}"
             )
         parsed.append((src, tree))
-
-    if env is not None:
-        # Reuses the trees parsed above rather than re-reading the srcs:
-        # syntax validity is a precondition of the import check anyway,
-        # so a second parse would only be a second chance to disagree.
-        undeclared = undeclared_imports(target, root, env, parsed)
-        if undeclared:
-            return ActionResult(
-                target.label, False, "; ".join(undeclared)
-            )
-
-    return ActionResult(target.label, True, "ok")
+    return parsed, None
 
 
 def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> ActionResult:

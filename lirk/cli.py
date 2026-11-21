@@ -1,5 +1,6 @@
 """The `lirk` command line: `build` and `test` over one or more target
-labels or patterns, `verify` to audit cached results, and `clean`. Output is kept compact -- this runs in
+labels or patterns, `verify` to audit cached results, `fix` to add
+missing deps, and `clean`. Output is kept compact -- this runs in
 a narrow phone terminal.
 
 Label forms accepted on the command line:
@@ -498,6 +499,40 @@ def cmd_verify(
     return 1 if stale else 0
 
 
+def cmd_fix(root: Path, labels: list[str], dry_run: bool = False) -> int:
+    """Add the `deps` entries the import check reports as missing.
+
+    Exit 0 when nothing is left needing a hand fix (whether or not
+    anything was edited), 1 otherwise -- so `lirk fix && lirk build`
+    does what it reads like.
+    """
+    from lirk.fix import apply_plan, plan_fixes  # only paid for by `fix`
+
+    resolved = _resolve_roots(root, labels, "build")
+    if resolved is None:
+        return 1
+    graph, order, roots = resolved
+    scope = [l for l in order if l in roots]
+
+    plan = plan_fixes(root, graph, scope)
+    applied = apply_plan(root, graph, plan, write=not dry_run)
+
+    verb = "would add" if dry_run else "added"
+    for label, deps in applied.additions.items():
+        print(f"  fixed  {label}: {verb} {', '.join(deps)}", flush=True)
+    for label, reason in applied.manual:
+        print(f"  MANUAL {label}: {reason}", flush=True)
+
+    added = sum(len(d) for d in applied.additions.values())
+    print(
+        f"lirk: {verb} {added} dep(s) to {len(applied.additions)} target(s), "
+        f"{len(applied.manual)} need a hand fix"
+    )
+    if dry_run and applied.additions:
+        print("lirk: dry run -- no files were changed")
+    return 1 if applied.manual else 0
+
+
 def cmd_clean(root: Path) -> int:
     """Delete the incremental-build cache, and any temp file an
     interrupted save left beside it.
@@ -597,6 +632,18 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     )
     verify_p.add_argument("--root", type=Path, default=None, help=root_help)
 
+    fix_p = sub.add_parser(
+        "fix", help="add the deps entries the import check reports as missing"
+    )
+    fix_p.add_argument(
+        "labels", nargs="*", default=[ALL_TARGETS], metavar="label",
+        help=label_help + " (default: //...)",
+    )
+    fix_p.add_argument(
+        "--dry-run", action="store_true", help="report the edits without making them"
+    )
+    fix_p.add_argument("--root", type=Path, default=None, help=root_help)
+
     clean_p = sub.add_parser("clean", help="delete the incremental-build cache")
     clean_p.add_argument("--root", type=Path, default=None, help=root_help)
 
@@ -623,6 +670,8 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         return cmd_build(root, args.labels, force=args.force)
     if args.command == "clean":
         return cmd_clean(root)
+    if args.command == "fix":
+        return cmd_fix(root, args.labels, dry_run=args.dry_run)
     if args.command == "verify":
         if args.sample is not None and args.sample < 1:
             parser.error("--sample must be at least 1")

@@ -56,3 +56,10 @@ type = "test"
 srcs = ["test_cli.py"]
 deps = [":init", "//lirk:cli"]
 data = ["fixtures"]
+
+[[target]]
+name = "test_fix"
+type = "test"
+srcs = ["test_fix.py"]
+deps = [":init", "//lirk:cli", "//lirk:fix"]
+data = ["fixtures"]

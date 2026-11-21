@@ -108,6 +108,7 @@ Either way installs a `lirk` console script on `PATH`:
 lirk build //...                  # everything
 lirk test //app/... //lib:all     # a subtree, plus one whole package
 lirk test //app:app_test --force  # one target, ignoring the cache
+lirk fix                          # add deps the import check says are missing
 lirk verify --sample 5            # re-check cached results against fresh runs
 lirk clean                        # discard the incremental-build cache
 ```

@@ -35,10 +35,16 @@ srcs = ["cache.py"]
 deps = [":graph"]
 
 [[target]]
+name = "fix"
+type = "library"
+srcs = ["fix.py"]
+deps = [":actions", ":graph", ":targets"]
+
+[[target]]
 name = "cli"
 type = "library"
 srcs = ["cli.py"]
-deps = [":actions", ":cache", ":graph", ":targets"]
+deps = [":actions", ":cache", ":fix", ":graph", ":targets"]
 
 [[target]]
 name = "main"

@@ -49,7 +49,7 @@ deps = [":mylib"]
   whether or not you declared it — and an undeclared edge is missing
   from the fingerprint, so editing the imported package invalidates
   nothing and you get a cached PASS against changed inputs. Declaring
-  the dep is the fix.
+  the dep is the fix, and `lirk fix` will write it for you.
 
   Checked against the **transitive closure**, so an import satisfied by
   a dep-of-a-dep is fine; the fingerprint covers it either way.
