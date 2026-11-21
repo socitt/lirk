@@ -24,8 +24,8 @@ lirk: drafted 2 BUILD.lirk file(s), 3 target(s); 0 need a hand fix
 lirk: next: review the files, declare runtime-read files as `data`, then `lirk test //...`
 ```
 
-For each directory containing Python files, `init` writes a `BUILD.lirk`
-with:
+For each directory containing Python files, `init` writes a
+`BUILD.lirk` with:
 
 - one `library` target for the ordinary `.py` files, and
 - one `test` target for `test_*.py` and `*_test.py`, using pytest if
@@ -37,8 +37,12 @@ don't have one.
 
 `init` is safe to run again. It never touches a directory that already
 has a `BUILD.lirk`, so after adding a package, just rerun it. It skips
-virtualenvs, `build/`, `dist/`, `node_modules/` and hidden directories.
-Use `lirk init --dry-run` to see what it would write first.
+hidden directories, `node_modules/`, virtualenvs (recognised by their
+`pyvenv.cfg`, whatever they're called) and `build/` and `dist/`, and it
+says when it skips one of the last three, in case that was your code.
+It also points out subdirectories that hold no Python, which are often
+test data to declare. Use `lirk init --dry-run` to see what it would
+write first.
 
 ## 2. Review what it couldn't know
 
@@ -66,6 +70,22 @@ If you miss one, `lirk verify` will catch it the first time it matters
 - **Packages that import each other:** adding both edges would create
   a cycle. Usually this means some shared code wants to move into a
   third package that both can depend on.
+
+**Sharing a data directory between packages.** Give the directory
+its own target, and depend on that target wherever it's read:
+
+```toml
+# tests/golden/BUILD.lirk
+[[target]]
+name = "golden_data"
+type = "library"
+data = ["data"]
+```
+
+Any test that depends on `//tests/golden:golden_data` reruns when a file
+in `tests/golden/data/` changes. (A `data` path may also point into
+another package directly, like `"../tests/golden/data"`. It may not
+point outside the repo.)
 
 **Target boundaries.** One library per directory is a starting point,
 not a rule. A target is the unit of caching: a 20-file library is
@@ -177,6 +197,25 @@ class EntryPointTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertTrue(proc.stdout.strip())
 ```
+
+```toml
+[[target]]
+name = "main_test"
+type = "test"
+srcs = ["test_main.py"]
+deps = [":main"]          # the entry point's own target
+```
+
+The test imports nothing from your app; it *runs* it. lirk still
+treats `"-m", "cli.main"` in an argument list (and
+`runpy.run_module("cli.main")`) as a dependency on `cli.main`, so the
+build fails until that dep is declared, and `lirk fix` adds it for
+you. That matters: without the dep, editing your entry point would
+leave this test cached and green.
+
+If your test starts the program another way, for example by running a
+script by its file path, lirk can't see the connection. Add the dep
+yourself, and the file to `data` if it isn't in some target's `srcs`.
 
 Check the output as well as the exit code. A program whose `main()` is
 never called exits 0 too.

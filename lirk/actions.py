@@ -40,6 +40,24 @@ def _ran_zero_tests(stderr: str) -> bool:
     return bool(matches) and matches[-1] == "0"
 
 
+# pytest's closing summary, e.g. "==== 1 skipped in 0.01s ====" or
+# "==== 2 passed, 1 skipped in 0.30s ====".
+_PYTEST_SUMMARY = re.compile(r"^=+ (.*) in [\d.]+s\b.*=+\s*$", re.MULTILINE)
+
+
+def _pytest_skipped_module(stdout: str) -> bool:
+    """pytest collected nothing because the module skipped itself.
+
+    True only when the final summary reports skips and nothing else ran:
+    "1 skipped", not "no tests ran".
+    """
+    summaries = _PYTEST_SUMMARY.findall(stdout)
+    if not summaries:
+        return False
+    parts = {p.strip().split(" ", 1)[-1] for p in summaries[-1].split(",")}
+    return "skipped" in parts and parts <= {"skipped", "warning", "warnings", "deselected"}
+
+
 def _pytest_missing(stderr: str) -> bool:
     """`python -m pytest` failed because pytest isn't importable.
 
@@ -145,8 +163,11 @@ def owner_index(
     return {path: frozenset(labels) for path, labels in index.items()}
 
 
-def _imported_modules(tree: ast.AST, src_path: Path) -> list[tuple[str, Path | None]]:
-    """Every module an AST imports, as (dotted name, base directory).
+def _imported_modules(
+    tree: ast.AST, src_path: Path
+) -> list[tuple[str, Path | None, str]]:
+    """Every module an AST imports or runs, as (dotted name, base
+    directory, verb) -- the verb is "imports" or "runs", for messages.
 
     The base is None for an absolute import (resolve it against sys.path
     as the runner sets it up) and an explicit directory for a relative
@@ -156,11 +177,45 @@ def _imported_modules(tree: ast.AST, src_path: Path) -> list[tuple[str, Path | N
     be a submodule -- which is an edge into another package -- or an
     ordinary attribute, which simply won't resolve to a file and is
     ignored.
+
+    Modules *run* rather than imported count too, because they are just
+    as much an input: a literal `"-m", "pkg.mod"` pair in a list or
+    tuple (the argv of `subprocess.run([sys.executable, "-m", ...])`),
+    and `runpy.run_module("pkg.mod")`. That is the documented way to
+    test an entry point, and without this its test imported nothing
+    from the app: no edge was required, `lirk fix` added none, and
+    editing the entry point left the test cached and green (found by
+    the slingshot repo). A string that resolves to no repo file is
+    ignored like any other unresolvable import, so false positives
+    cost nothing.
     """
-    found: list[tuple[str, Path | None]] = []
+    found: list[tuple[str, Path | None, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            found.extend((alias.name, None) for alias in node.names)
+        if isinstance(node, (ast.List, ast.Tuple)):
+            elts = node.elts
+            for flag, value in zip(elts, elts[1:]):
+                if (
+                    isinstance(flag, ast.Constant) and flag.value == "-m"
+                    and isinstance(value, ast.Constant) and isinstance(value.value, str)
+                ):
+                    found.append((value.value, None, "runs"))
+                    # `-m pkg` executes pkg/__main__.py as well as
+                    # pkg/__init__.py; both are inputs. Resolves to
+                    # nothing for a plain module, so harmless there.
+                    found.append((f"{value.value}.__main__", None, "runs"))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, (ast.Attribute, ast.Name))
+            and (node.func.attr if isinstance(node.func, ast.Attribute) else node.func.id)
+            == "run_module"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            found.append((node.args[0].value, None, "runs"))
+            found.append((f"{node.args[0].value}.__main__", None, "runs"))
+        elif isinstance(node, ast.Import):
+            found.extend((alias.name, None, "imports") for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             base: Path | None = None
             if node.level:
@@ -170,10 +225,10 @@ def _imported_modules(tree: ast.AST, src_path: Path) -> list[tuple[str, Path | N
                     base = base.parent
             prefix = node.module or ""
             if prefix:
-                found.append((prefix, base))
+                found.append((prefix, base, "imports"))
             for alias in node.names:
                 dotted = f"{prefix}.{alias.name}" if prefix else alias.name
-                found.append((dotted, base))
+                found.append((dotted, base, "imports"))
     return found
 
 
@@ -218,12 +273,13 @@ class ImportProblem:
     dotted: str
     path: str
     owners: frozenset[str]
+    verb: str = "imports"  # or "runs", for a module run with -m
 
     def message(self) -> str:
         if not self.owners:
-            return f"{self.src} imports '{self.dotted}' -- no target declares {self.path}"
+            return f"{self.src} {self.verb} '{self.dotted}' -- no target declares {self.path}"
         return (
-            f"{self.src} imports '{self.dotted}' "
+            f"{self.src} {self.verb} '{self.dotted}' "
             f"({', '.join(sorted(self.owners))}), not in deps"
         )
 
@@ -283,7 +339,7 @@ def import_problems(
 
     for src, tree in parsed:
         src_path = (pkg_dir / src).resolve()
-        for dotted, base in _imported_modules(tree, src_path):
+        for dotted, base, verb in _imported_modules(tree, src_path):
             bases = (base,) if base is not None else (pkg_dir, root)
             found = None
             for one in bases:
@@ -305,7 +361,7 @@ def import_problems(
                 continue
             seen.add((src, dotted))
             rel = found.relative_to(root_resolved).as_posix()
-            problems.append(ImportProblem(src, dotted, rel, owners))
+            problems.append(ImportProblem(src, dotted, rel, owners, verb))
 
     return problems
 
@@ -430,6 +486,7 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
     timed_out: list[str] = []
     ran_nothing: list[str] = []
     missing_runner: list[str] = []
+    skipped_whole: list[str] = []
 
     timeout = target.timeout if target.timeout is not None else TEST_TIMEOUT_SECONDS
 
@@ -509,7 +566,17 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
         if target.runner == "pytest":
             # pytest's own, version-stable signal: exit 5 means nothing
             # was collected. Unlike unittest on 3.11, it never exits 0
-            # for an empty module, so the exit code is enough.
+            # for an empty module, so the exit code is enough -- except
+            # that a module which skipped *itself* (a module-level
+            # `pytest.importorskip("numpy")`) exits 5 too. That file has
+            # tests and chose not to run them here, which is a pass, just
+            # like a test skipped at function level; pytest says so in
+            # its summary ("1 skipped"), where an empty file says "no
+            # tests ran". The Python-environment fingerprint reruns it
+            # once the missing package is installed, so no stale PASS.
+            if proc.returncode == 5 and _pytest_skipped_module(proc.stdout):
+                skipped_whole.append(module)
+                continue
             ran_no_tests = proc.returncode == 5
             if _pytest_missing(proc.stderr):
                 missing_runner.append(module)

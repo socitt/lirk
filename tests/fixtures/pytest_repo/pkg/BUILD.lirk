@@ -28,3 +28,10 @@ name = "root_conftest_test"
 type = "test"
 runner = "pytest"
 srcs = ["test_root_conftest.py"]
+
+# The whole module skips itself on a missing optional package.
+[[target]]
+name = "modskip_test"
+type = "test"
+runner = "pytest"
+srcs = ["test_modskip.py"]

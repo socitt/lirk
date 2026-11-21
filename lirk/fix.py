@@ -84,7 +84,8 @@ def plan_fixes(root: Path, graph: Graph, scope: list[str]) -> FixPlan:
             if label in transitive_closure(working, {owner}):
                 plan.manual.append(
                     (label, f"{problem.message()} -- adding {owner} would create a "
-                            "dependency cycle")
+                            "dependency cycle; split one of the two into smaller "
+                            "targets so the shared code has a target of its own")
                 )
                 continue
             chosen.append(owner)

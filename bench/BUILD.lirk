@@ -5,3 +5,5 @@
 name = "bench"
 type = "library"
 srcs = ["generate.py", "run.py"]
+# run.py runs `python -m lirk`, so lirk is an input to it.
+deps = ["//lirk:main"]

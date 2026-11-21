@@ -34,11 +34,21 @@ path.
 directory`.** A typo in `.lirk-root`'s `ignore` list, so the directory
 you meant to skip is being scanned. Fix the path.
 
-**`//lib:lib is type 'library', not 'test'`.** `lirk test` runs test
-targets. Use `lirk build` for a library, or a pattern like `//lib/...`,
-which selects just the tests.
+**`//lib:lib is type 'library', not 'test' -- its tests: ...`.** `lirk
+test` runs test targets, and the message lists the ones that depend on
+that library, nearest first. Run one of those, use `lirk build` for the
+library itself, or use a pattern like `//lib/...`, which selects just
+the tests.
 
 ## BUILD files
+
+**`unknown target: //physics:orbit -- did you mean
+//physics:orbits?`.** A typo in the target name; lirk suggests the
+closest match.
+
+**`data entry '../../elsewhere' is outside the repo root`.** Every
+input must live inside the repo, so that a fresh clone has it. Move the
+file into the repo, or give it its own target there.
 
 **`unknown key(s): dpes`.** A typo in a field name. See
 [BUILD files](build-format.html) for the valid fields.
@@ -77,9 +87,12 @@ create a cycle. The message says which. Decide and edit by hand.
 
 ## Test failures
 
-**`contained no tests: test_empty`.** That test file defines no tests.
-It's treated as a failure because it's almost always a mistake, such as
-a renamed class or a lost import.
+**`contained no tests: test_empty`.** That test file defines no tests,
+or none that the runner found. It's treated as a failure because it's
+almost always a mistake, such as a renamed class or a lost import. (A
+pytest file that *skips itself*, say with a module-level
+`pytest.importorskip("numpy")`, is a pass, not this error. lirk reruns
+it automatically once the package is installed.)
 
 **`ModuleNotFoundError: No module named 'greeting.greeting';
 'greeting' is not a package`.** A module has the same name as its own
@@ -104,8 +117,9 @@ outside the repo are never loaded.
 
 **`STALE //x:x_test (tests): cached as passing, fails when re-run`**
 (from `lirk verify`). The test depends on something lirk doesn't
-fingerprint, almost always a file it reads at runtime. Add that file or
-its directory to the target's `data`. The stale entry has already been
+fingerprint: usually a file it reads at runtime, or a script it runs by
+file path. Add that file or its directory to the target's `data`, or
+add the script's target to `deps`. The stale entry has already been
 removed, so the next `lirk test` shows the real result.
 
 **Everything reran and I didn't change anything.** Your Python version

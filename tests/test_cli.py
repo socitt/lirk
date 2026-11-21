@@ -1201,5 +1201,40 @@ class RootConfigTests(unittest.TestCase):
         self.assertIn("'timeout' must be a positive integer", err)
 
 
+class LabelHintTests(unittest.TestCase):
+    """Typos and library-to-`test` mistakes get a pointer, not just an
+    error (suggested by slingshot)."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def test_a_mistyped_target_suggests_the_close_match(self):
+        code, _, err = _run_both(["build", "//a:a_lbi"], root=self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("unknown target: //a:a_lbi -- did you mean //a:a_lib?", err)
+
+    def test_a_mistyped_package_is_matched_repo_wide(self):
+        _, _, err = _run_both(["build", "//aa:a_lib"], root=self.root)
+        self.assertIn("did you mean //a:a_lib?", err)
+
+    def test_nothing_close_gives_no_suggestion(self):
+        _, _, err = _run_both(["build", "//zzz:qqqqqq"], root=self.root)
+        self.assertIn("unknown target: //zzz:qqqqqq\n", err)
+
+    def test_a_library_passed_to_test_names_its_tests(self):
+        # c_lib is reached by every test in the chain a -> b -> c.
+        code, _, err = _run_both(["test", "//c:c_lib"], root=self.root)
+        self.assertEqual(code, 1)
+        self.assertIn(
+            # Nearest first: c's own test, then the rest.
+            "//c:c_lib is type 'library', not 'test' -- its tests: "
+            "//c:c_test, //a:a_test, //b:b_test",
+            err,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
