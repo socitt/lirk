@@ -438,7 +438,20 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
             # the package: lirk keeps its own cache, and a tool that
             # writes into the source tree as a side effect of a test run
             # is how inputs start changing underneath their fingerprint.
-            argv = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", src]
+            #
+            # --rootdir and --confcutdir pin pytest to the repo root. Left
+            # to itself, pytest run from the package directory takes that
+            # directory as rootdir and stops loading conftest.py files
+            # there -- so a root conftest lirk fingerprints (pytest_inputs)
+            # was silently never loaded. Found by the slingshot repo, where
+            # a seeding guard in the root conftest was inactive under lirk
+            # while its tests passed. confcutdir also stops pytest loading
+            # a conftest from *above* the repo, which lirk does not see.
+            root_str = str(root.resolve())
+            argv = [
+                sys.executable, "-m", "pytest", "-p", "no:cacheprovider",
+                f"--rootdir={root_str}", f"--confcutdir={root_str}", src,
+            ]
         else:
             argv = [sys.executable, "-m", "unittest", module]
         try:

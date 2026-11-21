@@ -31,7 +31,7 @@ class CacheError(Exception):
 # Bump this whenever the behaviour of `validate_target` or `run_test`
 # changes, so existing caches are invalidated instead of trusting a
 # green result computed under different rules.
-ACTION_VERSION = 11
+ACTION_VERSION = 12
 
 
 def _hash_file(path: Path, label: str) -> str:
@@ -223,6 +223,7 @@ def save_cache(path: Path, fingerprints: dict[str, str]) -> None:
 
 
 def needs_build(cache_key: str, fingerprint: str, cache: dict[str, str]) -> bool:
-    """`cache_key` is "<mode>:<label>", not a bare label -- build and
-    test results for one target are cached separately."""
+    """`cache_key` is "build:<label>" (the target validates, whichever
+    command checked it) or "test:<label>" (a test target's tests ran
+    and passed) -- never a bare label."""
     return cache.get(cache_key) != fingerprint

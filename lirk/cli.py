@@ -1,6 +1,7 @@
 """The `lirk` command line: `build` and `test` over one or more target
 labels or patterns, `verify` to audit cached results, `fix` to add
-missing deps, and `clean`. Output is kept compact -- this runs in
+missing deps, `init` to draft BUILD files for an existing repo, and
+`clean`. Output is kept compact -- this runs in
 a narrow phone terminal.
 
 Label forms accepted on the command line:
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -35,9 +37,17 @@ from lirk.cache import (
     save_cache,
 )
 from lirk.graph import Graph, GraphError, build_graph, topological_sort, transitive_closure
-from lirk.targets import ROOT_MARKER, ConfigError
+from lirk.targets import BUILD_FILENAME, ROOT_MARKER, ConfigError
 
 ALL_TARGETS = "//..."
+# A run whose tests took at least this long in total ends by naming its
+# slowest ones. Below it the list would be noise on a short run.
+SLOWEST_REPORT_THRESHOLD = 10.0
+SLOWEST_REPORT_COUNT = 3
+# Validation is normally instant; only a slow one is worth a duration.
+SLOW_BUILD_SECONDS = 1.0
+# How many uncached targets `lirk verify` names before summarising.
+VERIFY_UNCACHED_SHOWN = 5
 RECURSIVE_SUFFIX = "/..."
 PACKAGE_WILDCARD = "all"
 
@@ -158,6 +168,8 @@ class ExecutionSummary:
     # dependents are deliberately not in here: they are consequences,
     # and listing them buries the labels worth acting on.
     failures: list[str] = field(default_factory=list)
+    # (label, seconds) for every test target actually run this time.
+    test_durations: list[tuple[str, float]] = field(default_factory=list)
 
     @property
     def tests_total(self) -> int:
@@ -174,10 +186,10 @@ def _execute(
 ) -> tuple[bool, ExecutionSummary]:
     """Validate (and, in 'test' mode, run) each target in `order`.
 
-    `mode` ('build' or 'test') namespaces the cache: `lirk build`
-    merely validating a test target's files must not count as
-    `lirk test` having actually run and passed it, so the two modes
-    never share a cache entry for the same target.
+    `mode` ('build' or 'test') decides whether test targets are run or
+    only validated. Cache keys follow the action: `build:<label>` for a
+    validation (shared by both commands), `test:<label>` only for a
+    test target whose tests actually ran.
 
     `force`, if set, skips the cache check so every target is
     re-validated/re-run regardless of its fingerprint, without
@@ -244,8 +256,14 @@ def _execute(
 
     for label in order:
         target = graph.targets[label]
-        cache_key = f"{mode}:{label}"
         is_test = mode == "test" and target.type == "test"
+        # The key names the *action*, not the command: validating a target
+        # is the same work whichever command asks for it, so `lirk build`
+        # after `lirk test` reuses the library checks instead of redoing
+        # them. Only actually running a test target's tests gets a test:
+        # entry -- `lirk build` merely validating a test target must never
+        # count as its tests having passed.
+        cache_key = f"test:{label}" if is_test else f"build:{label}"
 
         if label in failed:
             # A preflight missing-file failure, already reported above.
@@ -272,16 +290,27 @@ def _execute(
 
         env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}))
 
+        started = time.monotonic()
         if is_test:
             result = run_test(target, root, env)
             verb = "PASS" if result.ok else "FAIL"
         else:
             result = validate_target(target, root, env)
             verb = "built" if result.ok else "FAIL"
+        elapsed = time.monotonic() - started
+        # Wall-clock from a monotonic clock: iSH-AOK's CPU-time accounting
+        # is known to be unreliable (DESIGN.md §4), and wall time is what
+        # the person waiting actually experiences.
+        timing = ""
+        if is_test:
+            summary.test_durations.append((label, elapsed))
+            timing = f" ({_format_duration(elapsed)})"
+        elif elapsed >= SLOW_BUILD_SECONDS:
+            timing = f" ({_format_duration(elapsed)})"
 
         if result.ok:
             cache[cache_key] = fp
-            print(f"  {verb:6} {label}", flush=True)
+            print(f"  {verb:6} {label}{timing}", flush=True)
             if is_test:
                 summary.tests_passed += 1
             else:
@@ -297,13 +326,37 @@ def _execute(
             summary.failures.append(label)
             if is_test:
                 summary.tests_failed += 1
-            print(f"  {verb:6} {label}: {result.message}", flush=True)
+            print(f"  {verb:6} {label}{timing}: {result.message}", flush=True)
             for stream in (result.stdout, result.stderr):
                 if stream.strip():
                     print(stream.rstrip(), flush=True)
 
     save_cache(cache_path, cache)
     return ok, summary
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(int(round(seconds)), 60)
+    return f"{minutes}m{secs:02d}s"
+
+
+def _print_slowest(summary: ExecutionSummary) -> None:
+    """Name the slowest test targets of a run that took a while.
+
+    The single most useful fact for choosing a `timeout`, or deciding
+    what to split, and otherwise only recoverable by scrolling back
+    through every line. Like _print_failures, it restates what lirk
+    measured itself and touches nothing about captured output.
+    """
+    total = sum(seconds for _, seconds in summary.test_durations)
+    if total < SLOWEST_REPORT_THRESHOLD or len(summary.test_durations) < 2:
+        return
+    slowest = sorted(summary.test_durations, key=lambda d: d[1], reverse=True)
+    print(f"lirk: slowest (of {_format_duration(total)} in tests):")
+    for label, seconds in slowest[:SLOWEST_REPORT_COUNT]:
+        print(f"  {_format_duration(seconds):>6}  {label}")
 
 
 def _print_failures(summary: ExecutionSummary) -> None:
@@ -377,6 +430,7 @@ def cmd_test(root: Path, labels: list[str], force: bool = False) -> int:
     subset_order = [l for l in order if l in closure]
 
     ok, summary = _execute(root, graph, subset_order, mode="test", force=force)
+    _print_slowest(summary)
     _print_failures(summary)
     passed = summary.tests_passed + summary.tests_cached
     print(f"lirk: {passed}/{summary.tests_total} tests passed")
@@ -436,19 +490,19 @@ def cmd_verify(
     cache_path = root / CACHE_FILENAME
     cache = load_cache(cache_path)
 
-    # Each (mode, label) whose entry is valid right now. Both modes cache
-    # every target they process (a library validated during `lirk test`
-    # is stored as test:<label>), so each entry is its own claim, checked
-    # by re-doing what that mode did for that target.
+    # Each (kind, label) whose entry is valid right now: build:<label>
+    # claims the target validates, test:<label> (test targets only)
+    # claims its tests pass. Each is checked by re-doing that action.
     claims = [
-        (mode, label)
+        (kind, label)
         for label in subset_order
         if label in fingerprints
-        for mode in ("build", "test")
-        if not needs_build(f"{mode}:{label}", fingerprints[label], cache)
+        for kind in ("build", "test")
+        if (kind == "build" or graph.targets[label].type == "test")
+        and not needs_build(f"{kind}:{label}", fingerprints[label], cache)
     ]
     claimed = {label for _, label in claims}
-    not_cached = sum(1 for l in subset_order if l not in claimed)
+    uncached = [l for l in subset_order if l not in claimed]
 
     if sample is not None and sample < len(claims):
         import random  # only paid for when sampling is asked for
@@ -462,21 +516,22 @@ def cmd_verify(
     owners = owner_index(graph.targets, root)
     stale: list[str] = []
     verified = 0
-    for mode, label in claims:
+    for kind, label in claims:
         target = graph.targets[label]
         env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}))
-        if mode == "test" and target.type == "test":
+        what = "tests" if kind == "test" else "build"
+        if kind == "test":
             result = run_test(target, root, env)
         else:
             result = validate_target(target, root, env)
         if result.ok:
             verified += 1
-            print(f"  verified {label} ({mode})", flush=True)
+            print(f"  verified {label} ({what})", flush=True)
             continue
-        stale.append(f"{label} ({mode})")
-        cache.pop(f"{mode}:{label}", None)
+        stale.append(f"{label} ({what})")
+        cache.pop(f"{kind}:{label}", None)
         save_cache(cache_path, cache)
-        print(f"  STALE  {label} ({mode}): cached as passing, fails when re-run: "
+        print(f"  STALE  {label} ({what}): cached as passing, fails when re-run: "
               f"{result.message}", flush=True)
         for stream in (result.stdout, result.stderr):
             if stream.strip():
@@ -493,8 +548,16 @@ def cmd_verify(
         )
     print(
         f"lirk: {verified} verified, {len(stale)} stale, "
-        f"{not_cached} target(s) not cached"
+        f"{len(uncached)} target(s) not cached"
     )
+    if uncached:
+        # Named, not just counted: "1 target(s) not cached" left the
+        # reader to work out which one. Capped so //... on a large,
+        # cold repo doesn't scroll the summary away.
+        shown = ", ".join(uncached[:VERIFY_UNCACHED_SHOWN])
+        more = len(uncached) - VERIFY_UNCACHED_SHOWN
+        print(f"lirk: not cached (nothing to verify): {shown}"
+              + (f", and {more} more" if more > 0 else ""))
     print("lirk: OK" if not stale else "lirk: FAILED")
     return 1 if stale else 0
 
@@ -518,8 +581,9 @@ def cmd_fix(root: Path, labels: list[str], dry_run: bool = False) -> int:
     applied = apply_plan(root, graph, plan, write=not dry_run)
 
     verb = "would add" if dry_run else "added"
+    tag = "would fix" if dry_run else "fixed "
     for label, deps in applied.additions.items():
-        print(f"  fixed  {label}: {verb} {', '.join(deps)}", flush=True)
+        print(f"  {tag} {label}: {verb} {', '.join(deps)}", flush=True)
     for label, reason in applied.manual:
         print(f"  MANUAL {label}: {reason}", flush=True)
 
@@ -530,6 +594,61 @@ def cmd_fix(root: Path, labels: list[str], dry_run: bool = False) -> int:
     )
     if dry_run and applied.additions:
         print("lirk: dry run -- no files were changed")
+    return 1 if applied.manual else 0
+
+
+def cmd_init(root: Path, dry_run: bool = False) -> int:
+    """Draft BUILD.lirk files for every package without one, then let
+    `fix`'s planner add the deps their imports call for.
+
+    Exit 0 when the result needs no hand fixes, 1 otherwise -- the MANUAL
+    lines say what is left.
+    """
+    from lirk.fix import apply_plan, plan_fixes
+    from lirk.scaffold import draft_packages, write_drafts
+
+    drafts, kept = draft_packages(root)
+    for package in kept:
+        print(f"  kept   {package or '(root)'}/{BUILD_FILENAME}: already exists", flush=True)
+    if not drafts:
+        print("lirk: nothing to draft -- every package with Python files has a BUILD.lirk")
+        return 0
+
+    for d in drafts:
+        parts = []
+        if d.srcs:
+            parts.append(f"library :{d.name} ({len(d.srcs)} srcs)")
+        if d.tests:
+            parts.append(f"test :{d.name}_test ({len(d.tests)} srcs, {d.runner})")
+        where = f"{d.package}/{BUILD_FILENAME}" if d.package else BUILD_FILENAME
+        verb = "would create" if dry_run else "created"
+        print(f"  {verb} {where}: {'; '.join(parts)}", flush=True)
+
+    if dry_run:
+        print(
+            f"lirk: dry run -- would draft {len(drafts)} BUILD.lirk file(s); "
+            "deps are derived from imports once the files exist"
+        )
+        return 0
+
+    created = write_drafts(root, drafts)
+    loaded = _load_graph(root)
+    if loaded is None:
+        return 1
+    graph, order = loaded
+    scope = [l for l in order if l in set(created)]
+    applied = apply_plan(root, graph, plan_fixes(root, graph, scope), write=True)
+    for label, deps in applied.additions.items():
+        print(f"  deps   {label}: {', '.join(deps)}", flush=True)
+    for label, reason in applied.manual:
+        print(f"  MANUAL {label}: {reason}", flush=True)
+
+    print(
+        f"lirk: drafted {len(drafts)} BUILD.lirk file(s), {len(created)} target(s); "
+        f"{len(applied.manual)} need a hand fix"
+    )
+    print("lirk: next: review the files, declare runtime-read files as `data`, "
+          "then `lirk test //...`")
     return 1 if applied.manual else 0
 
 
@@ -644,6 +763,18 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     )
     fix_p.add_argument("--root", type=Path, default=None, help=root_help)
 
+    init_p = sub.add_parser(
+        "init", help="draft BUILD.lirk files for packages that have none"
+    )
+    init_p.add_argument(
+        "--dry-run", action="store_true", help="list the files without writing them"
+    )
+    init_p.add_argument(
+        "--root", type=Path, default=None,
+        help="repo root (default: nearest .lirk-root, else cwd -- which "
+             "init then marks with a new .lirk-root)",
+    )
+
     clean_p = sub.add_parser("clean", help="delete the incremental-build cache")
     clean_p.add_argument("--root", type=Path, default=None, help=root_help)
 
@@ -670,6 +801,8 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         return cmd_build(root, args.labels, force=args.force)
     if args.command == "clean":
         return cmd_clean(root)
+    if args.command == "init":
+        return cmd_init(root, dry_run=args.dry_run)
     if args.command == "fix":
         return cmd_fix(root, args.labels, dry_run=args.dry_run)
     if args.command == "verify":

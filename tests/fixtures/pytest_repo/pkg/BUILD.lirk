@@ -21,3 +21,10 @@ name = "empty_test"
 type = "test"
 runner = "pytest"
 srcs = ["test_empty.py"]
+
+# Uses a fixture from the *repo root* conftest.py, not the package's.
+[[target]]
+name = "root_conftest_test"
+type = "test"
+runner = "pytest"
+srcs = ["test_root_conftest.py"]

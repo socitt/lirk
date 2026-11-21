@@ -105,6 +105,7 @@ pip install .          # or: pip install -e .   (editable, for development)
 Either way installs a `lirk` console script on `PATH`:
 
 ```
+lirk init                         # draft BUILD files for an existing repo
 lirk build //...                  # everything
 lirk test //app/... //lib:all     # a subtree, plus one whole package
 lirk test //app:app_test --force  # one target, ignoring the cache
@@ -136,12 +137,15 @@ generates alongside your source:
 
 ```
 .lirk-cache.json
+.lirk-cache.json.*.tmp
 __pycache__/
 *.pyc
 ```
 
 `.lirk-cache.json` is lirk's incremental-build cache, written at the
-repo root; it's local state, not something to commit or share.
+repo root; it's local state, not something to commit or share. The
+`.tmp` line covers the temporary file a save interrupted mid-write can
+leave beside it (`lirk clean` removes those too).
 
 ### Repo root
 

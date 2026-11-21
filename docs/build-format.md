@@ -73,8 +73,8 @@ deps = [":mylib"]
   things the target depends on that are not Python source (e.g. a
   `.txt` fixture read at runtime). Defaults to `[]`. Fingerprinted the
   same way as `srcs` so changes invalidate the cache, but entries here
-  are not syntax-checked — putting a non-Python file in `srcs` instead
-  produces a bogus syntax error.
+  are not syntax-checked. (A non-`.py` file in `srcs` is rejected when
+  the BUILD file is parsed, with a message pointing here.)
 
   An entry may name a **directory**, which is fingerprinted
   recursively: editing, adding, or removing any file beneath it
@@ -169,6 +169,7 @@ generates alongside your source:
 
 ```
 .lirk-cache.json
+.lirk-cache.json.*.tmp
 __pycache__/
 *.pyc
 ```
