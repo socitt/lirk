@@ -221,6 +221,55 @@ status. *What's left:* paste the issue link in.
 
 ---
 
+## Feature ideas (proposed 2026-11-21)
+
+Candidates, not commitments. Each one fits inside DESIGN §1 (one
+direct `subprocess.run()` per src, serial, no process groups) and none
+of them reopens a settled decision in §6. Roughly in order of value
+for effort.
+
+- [ ] **F1 — CI on every supported Python.** No workflow exists, and
+  `pyproject.toml` promises 3.11+ while development happens on one
+  version. A GitHub Actions matrix (3.11, 3.12, 3.13) running both
+  `unittest discover` and `python3 -m lirk test //...` would catch a
+  3.11-only break, like the `Ran 0 tests` exit-code difference L1 had
+  to work around.
+- [ ] **F2 — Per-target durations in the output.** e.g. `PASS
+  //a:a_test (12.4s)`. Cheap (one `time.monotonic()` around the
+  existing call), and it is the data you need to choose a sensible
+  `timeout` and to find the slow target in a suite.
+- [ ] **F3 — Repo-wide default `timeout` in `.lirk-root`.** For
+  example `timeout = 60`, so the 600s fallback can be lowered once
+  rather than per target. A per-target value still wins. It would
+  need to enter the fingerprint the same way the per-target one does.
+- [ ] **F4 — `--fail-fast`.** Stop after the first FAIL. Keep-going
+  stays the default (it is the deliberate behaviour per §5), but on a
+  phone a long suite with a broken core library is mostly waiting.
+- [ ] **F5 — Prune dead cache entries.** `.lirk-cache.json` keeps
+  entries for targets that were deleted or renamed, forever. Drop keys
+  whose label is no longer in the graph when saving. This is safe
+  because only labels absent from the *whole* graph are dropped, never
+  ones merely outside this run's scope.
+- [ ] **F6 — Warn about undeclared `.py` files in a package.** A
+  `lirk build` note, not a failure, listing `.py` files in a package
+  directory that no target declares. It catches the H2 family *before*
+  something imports the file, and catches dead files. Needs a design
+  decision on how test-only helpers and scripts opt out.
+- [ ] **F7 — Pass a test filter through to unittest.** e.g. `lirk test
+  //a:a_test -- -k castling`, appended to the existing argv (an
+  argument, not a process-model change). A filtered run must **never**
+  be written to the cache, or it would record a partial pass as a full
+  one.
+- [ ] **F8 — Flag `ignore` entries that match nothing.** A typo'd path
+  in `.lirk-root`'s `ignore` silently excludes nothing, and the
+  failure then shows up as a confusing graph error from the very
+  fixtures it was meant to hide.
+- [ ] **F9 — Publish to PyPI after the v1 tag.** `pip install lirk`
+  rather than a git URL. Packaging is already in place.
+- [ ] **F10 — L7 (ancestor `__init__.py`).** Already tracked above;
+  listed here so the whole "what next" picture is in one place. Still
+  gated on a real repo hitting it.
+
 ## Next actions, in priority order
 
 **All three v1 criteria hold and the high-priority correctness work is
