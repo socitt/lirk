@@ -699,6 +699,31 @@ class RunModuleDetectionTests(unittest.TestCase):
         body = "import runpy\nrunpy.run_module('app.main', run_name='__main__')\n"
         self.assertFalse(self._validate(body, "[]").ok)
 
+    def test_running_a_package_needs_its_dunder_main(self):
+        # `-m app` executes app/__main__.py; its owner must be a dep too.
+        (self.root / "app" / "__init__.py").write_text("")
+        (self.root / "app" / "__main__.py").write_text("print('hi')\n")
+        (self.root / "app" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "pkg"\ntype = "library"\nsrcs = ["__init__.py"]\n\n'
+            '[[target]]\nname = "cli"\ntype = "library"\nsrcs = ["__main__.py"]\n'
+            'deps = [":pkg"]\n'
+        )
+        (self.root / "tool").mkdir()
+        (self.root / "tool" / "test_tool.py").write_text(
+            "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'app'])\n"
+        )
+        def validate(deps):
+            (self.root / "tool" / "BUILD.lirk").write_text(
+                f'[[target]]\nname = "t"\ntype = "test"\nsrcs = ["test_tool.py"]\ndeps = {deps}\n'
+            )
+            graph = build_graph(self.root)
+            return validate_target(graph.targets["//tool:t"], self.root,
+                                   _import_env(graph, self.root, "//tool:t"))
+        result = validate('["//app:pkg"]')
+        self.assertFalse(result.ok)
+        self.assertIn("runs 'app.__main__' (//app:cli)", result.message)
+        self.assertTrue(validate('["//app:cli"]').ok)
+
     def test_a_dash_m_naming_no_repo_module_is_ignored(self):
         body = "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'pip', '--version'])\n"
         self.assertTrue(self._validate(body, "[]").ok)

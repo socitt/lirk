@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-11-21): 298 tests, `python3 -m
+Last verified against source (2026-11-21): 299 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
 `lirk build //...` (19 targets) and `lirk test //...` (8 test targets)
 — which runs alongside the unittest invocation rather than replacing
@@ -391,6 +391,12 @@ The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
     the MANUAL text now suggests splitting.
   `ACTION_VERSION` 12 → 13 (#9 and #13 change what a result means).
   Version 1.1.0.
+  - **Caught in lirk's own repo by the #9 fix, minutes after it landed:**
+    `bench/run.py` runs `python -m lirk` without depending on lirk. Now
+    declared. "Runs a package" also requires its `__main__.py`, which is
+    what `-m pkg` actually executes. (The self-hosted run flagged it.
+    The first push of the #9 commit went out with that red, because a
+    pipe hid the exit code. Fixed in the next commit.)
 
 - **Quick wins F3, F4, F5, F8** (2026-11-21).
   - **F4 `--fail-fast`** on `build` and `test`: stops before starting

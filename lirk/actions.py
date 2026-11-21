@@ -199,6 +199,10 @@ def _imported_modules(
                     and isinstance(value, ast.Constant) and isinstance(value.value, str)
                 ):
                     found.append((value.value, None, "runs"))
+                    # `-m pkg` executes pkg/__main__.py as well as
+                    # pkg/__init__.py; both are inputs. Resolves to
+                    # nothing for a plain module, so harmless there.
+                    found.append((f"{value.value}.__main__", None, "runs"))
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, (ast.Attribute, ast.Name))
@@ -209,6 +213,7 @@ def _imported_modules(
             and isinstance(node.args[0].value, str)
         ):
             found.append((node.args[0].value, None, "runs"))
+            found.append((f"{node.args[0].value}.__main__", None, "runs"))
         elif isinstance(node, ast.Import):
             found.extend((alias.name, None, "imports") for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
