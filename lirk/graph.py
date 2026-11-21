@@ -124,7 +124,21 @@ def build_graph(root: Path) -> Graph:
     targets = load_targets(root, config)
     edges: dict[str, tuple[str, ...]] = {}
 
+    root_resolved = root.resolve()
     for label, target in targets.items():
+        # Every declared file must live inside the repo. `../other_pkg/x`
+        # is fine (it stays inside); a path that escapes the root is not:
+        # a fresh clone won't have it, so the fingerprint silently covers
+        # different inputs on different machines. Rejected, as .lirk-root
+        # rejects an `ignore` entry that escapes, rather than clamped.
+        for field_name, entries in (("srcs", target.srcs), ("data", target.data)):
+            for entry in entries:
+                where = (root / target.package / entry).resolve()
+                if not where.is_relative_to(root_resolved):
+                    raise GraphError(
+                        f"{label}: {field_name} entry {entry!r} is outside the "
+                        "repo root; every input must live inside the repo"
+                    )
         resolved = []
         for raw_dep in target.deps:
             dep_label = resolve_label(raw_dep, target.package)

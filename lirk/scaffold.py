@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from lirk.targets import BUILD_FILENAME, ROOT_MARKER, load_ignores
@@ -30,7 +30,14 @@ from lirk.targets import BUILD_FILENAME, ROOT_MARKER, load_ignores
 # Directory names never scanned for sources, beyond the dot-prefixed rule
 # the BUILD.lirk scan already applies: generated output and environments,
 # which hold Python that is not this repo's source.
-SKIP_DIRS = {"__pycache__", "node_modules", "venv", "env", "build", "dist", "site-packages"}
+# Never source, skipped silently. Deliberately *not* "env"/"venv": a real
+# virtualenv is recognised by its pyvenv.cfg whatever it's called, and a
+# package named `env` (an RL environment, settings) is ordinary code --
+# skipping it by name silently dropped one in the slingshot repo.
+SKIP_DIRS = {"__pycache__", "node_modules", "site-packages"}
+# Usually generated output (setuptools copies the package into build/),
+# so skipped -- but said out loud, since a package can have these names.
+SKIP_ANNOUNCED = {"build": "looks like build output", "dist": "looks like build output"}
 _TEST_FILE = re.compile(r"^(test_.*|.*_test)\.py$")
 _IMPORTS_UNITTEST = re.compile(r"^\s*(import unittest\b|from unittest\b)", re.MULTILINE)
 _IMPORTS_PYTEST = re.compile(r"^\s*(import pytest\b|from pytest\b)", re.MULTILINE)
@@ -43,6 +50,9 @@ class PackageDraft:
     srcs: list[str]
     tests: list[str]
     runner: str
+    # Subdirectories holding files but no Python: likely runtime data
+    # (fixtures, golden output) that tests read and should declare.
+    data_hints: list[str] = field(default_factory=list)
 
     @property
     def library_label(self) -> str | None:
@@ -56,7 +66,8 @@ class PackageDraft:
         """The BUILD.lirk text. Deps are left to `lirk fix`."""
         blocks = [
             "# Drafted by `lirk init`. Deps were derived from the srcs' imports.\n"
-            "# Declare any file a target reads at runtime under `data`.\n"
+            "# Declare any file a target reads at runtime under `data`, and\n"
+            "# split targets further as needed (each is a unit of caching).\n"
         ]
         if self.srcs:
             blocks.append(
@@ -98,22 +109,51 @@ def _runner_for(tests: list[Path]) -> str:
     return "unittest"
 
 
-def draft_packages(root: Path) -> tuple[list[PackageDraft], list[str]]:
-    """Drafts for every directory holding `.py` files and no BUILD.lirk,
-    and the packages skipped because they already have one."""
+def _holds_only_data(directory: Path) -> bool:
+    """True if `directory` contains files, none of them Python, at any
+    depth (ignoring hidden entries and __pycache__)."""
+    has_files = False
+    for dirpath, dirnames, filenames in os.walk(directory):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "__pycache__"]
+        for f in filenames:
+            if f.startswith("."):
+                continue
+            if f.endswith(".py"):
+                return False
+            has_files = True
+    return has_files
+
+
+def draft_packages(
+    root: Path,
+) -> tuple[list[PackageDraft], list[str], list[tuple[str, str]]]:
+    """Survey the repo for `lirk init`.
+
+    Returns (drafts for every directory holding `.py` files and no
+    BUILD.lirk, packages kept because they already have one, and
+    (directory, reason) for each directory skipped that a person might
+    have expected to be drafted).
+    """
     ignored = {Path(e.strip("/")) for e in load_ignores(root) if e.strip("/")}
     drafts: list[PackageDraft] = []
     kept: list[str] = []
+    skipped: list[tuple[str, str]] = []
     for dirpath, dirnames, filenames in os.walk(root):
         here = Path(dirpath)
         rel = here.relative_to(root)
-        dirnames[:] = sorted(
-            d for d in dirnames
-            if not d.startswith(".")
-            and d not in SKIP_DIRS
-            and (rel / d) not in ignored
-            and not _is_venv(here / d)
-        )
+        keep = []
+        for d in sorted(dirnames):
+            sub = rel / d
+            if d.startswith(".") or d in SKIP_DIRS or sub in ignored:
+                continue
+            if _is_venv(here / d):
+                skipped.append((sub.as_posix(), "a virtualenv"))
+                continue
+            if d in SKIP_ANNOUNCED:
+                skipped.append((sub.as_posix(), SKIP_ANNOUNCED[d]))
+                continue
+            keep.append(d)
+        dirnames[:] = keep
         py = sorted(f for f in filenames if f.endswith(".py"))
         # conftest.py is a pytest input, fingerprinted automatically for
         # pytest targets -- not a library src or a test module.
@@ -127,10 +167,13 @@ def draft_packages(root: Path) -> tuple[list[PackageDraft], list[str]]:
         tests = [f for f in py if _TEST_FILE.match(f)]
         srcs = [f for f in py if f not in tests]
         name = here.name if package else root.resolve().name
+        hints = [d for d in keep if _holds_only_data(here / d)]
         drafts.append(
-            PackageDraft(package, name, srcs, tests, _runner_for([here / t for t in tests]))
+            PackageDraft(
+                package, name, srcs, tests, _runner_for([here / t for t in tests]), hints
+            )
         )
-    return drafts, kept
+    return drafts, kept, skipped
 
 
 def write_drafts(root: Path, drafts: list[PackageDraft]) -> list[str]:

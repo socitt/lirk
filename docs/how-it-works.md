@@ -61,7 +61,8 @@ is importable), but lirk wouldn't know to rerun the test when that
 package changes. The cached pass would quietly go stale.
 
 So when lirk checks a target, it reads every import in its source files
-and confirms each one is covered by `deps`. An import that isn't fails
+(plus any module a test runs with `python -m`) and confirms each one is
+covered by `deps`. An import that isn't fails
 the build, naming exactly what to add, and `lirk fix` can add it for
 you. Imports from the standard library and installed packages are
 ignored.

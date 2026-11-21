@@ -66,7 +66,9 @@ dependencies come along automatically.
 
 ### `data`
 
-Declare anything a target reads that isn't Python. lirk fingerprints
+Declare anything a target reads that isn't Python. Paths are relative
+to the package directory, may reach into other packages, and must stay
+inside the repo. lirk fingerprints
 it, so editing a fixture reruns the tests that read it. This matters:
 an undeclared fixture can change without lirk noticing, and the test's
 old pass stays cached. Prefer naming a directory over listing files,

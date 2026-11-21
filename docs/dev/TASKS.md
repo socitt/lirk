@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-11-21): 283 tests, `python3 -m
+Last verified against source (2026-11-21): 298 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
 `lirk build //...` (19 targets) and `lirk test //...` (8 test targets)
 — which runs alongside the unittest invocation rather than replacing
@@ -359,6 +359,38 @@ The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
    concurrent runs become a real workflow.
 
 ## Recently closed
+
+- **slingshot round 2: #9, #12–#15** (2026-11-21), from its
+  `docs/lirk-notes.md` (75 invocations, no `signal: hangup`). Each was
+  reproduced against slingshot itself before and after the fix.
+  - **#9 (high): entry-point tests cached a stale PASS.** A test that runs
+    the app (`subprocess.run([sys.executable, "-m", "cli.main"])`)
+    imported nothing from it, so no dep was required and `fix`/`init`
+    added none. The import check now treats a literal `"-m", "pkg.mod"`
+    pair and `runpy.run_module("pkg.mod")` as a dependency, reported as
+    "runs". On slingshot, removing its three hand-declared entry-point
+    deps now fails the build, and `lirk fix` restores exactly those.
+    Docs gained the BUILD block and the reason.
+  - **#13: a pytest file that skips itself counted as "no tests".** pytest
+    exits 5 both for an empty file and for a module-level
+    `importorskip`; the summary line ("1 skipped" vs "no tests ran")
+    tells them apart, and a self-skipped file now passes. The
+    environment fingerprint reruns it once the package is installed.
+  - **#12:** `srcs`/`data` paths that leave the repo are a graph error.
+    Paths into other packages are still fine, and the docs show the
+    shared-data-target pattern.
+  - **#14:** an unknown label suggests the closest one (same package
+    first, near-ties only). A library passed to `lirk test` lists its
+    tests, nearest first.
+  - **#15:** `init` no longer skips `env/`, `venv/` by name (a virtualenv
+    is recognised by `pyvenv.cfg`), announces `build/`, `dist/` and
+    virtualenvs it skips, and hints directories that hold no Python as
+    `data`. It also fixes "1 srcs" and says "split targets further as
+    needed". slingshot's own `init` trial went from 20 MANUAL to 1, a
+    real cycle (`env` ↔ `npbackend` at one-target-per-directory), and
+    the MANUAL text now suggests splitting.
+  `ACTION_VERSION` 12 → 13 (#9 and #13 change what a result means).
+  Version 1.1.0.
 
 - **Quick wins F3, F4, F5, F8** (2026-11-21).
   - **F4 `--fail-fast`** on `build` and `test`: stops before starting

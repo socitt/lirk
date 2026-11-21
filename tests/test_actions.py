@@ -549,6 +549,10 @@ class PytestRunnerTests(unittest.TestCase):
         self.assertIn("1 of 1 src files failed", result.message)
         self.assertIn("meant to fail", result.stdout)
 
+    def test_a_module_that_skips_itself_passes(self):
+        result = self._run("//pkg:modskip_test")
+        self.assertTrue(result.ok, result.message + result.stdout)
+
     def test_module_collecting_nothing_is_a_failure(self):
         result = self._run("//pkg:empty_test")
         self.assertFalse(result.ok)
@@ -648,6 +652,56 @@ class PytestMissingTests(unittest.TestCase):
     def test_detects_the_interpreter_error(self):
         self.assertTrue(actions._pytest_missing("/usr/bin/python3: No module named pytest\n"))
         self.assertFalse(actions._pytest_missing("E   ModuleNotFoundError: No module named 'pytesty'\n"))
+
+
+class RunModuleDetectionTests(unittest.TestCase):
+    """An entry-point test runs the app as `python -m pkg.mod` and
+    imports nothing from it. The module it runs is still an input, so
+    it must be a declared dep (found by the slingshot repo, where the
+    documented pattern cached a stale PASS)."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name)
+        (self.root / "app").mkdir()
+        (self.root / "app" / "main.py").write_text("print('ok')\n")
+
+    def _validate(self, test_body, deps):
+        (self.root / "app" / "test_main.py").write_text(test_body)
+        (self.root / "app" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "main"\ntype = "library"\nsrcs = ["main.py"]\n\n'
+            '[[target]]\nname = "main_test"\ntype = "test"\nsrcs = ["test_main.py"]\n'
+            f"deps = {deps}\n"
+        )
+        graph = build_graph(self.root)
+        label = "//app:main_test"
+        return validate_target(graph.targets[label], self.root, _import_env(graph, self.root, label))
+
+    SUBPROCESS = (
+        "import subprocess, sys\n"
+        "subprocess.run([sys.executable, '-m', 'app.main'], check=True)\n"
+    )
+
+    def test_a_module_run_with_dash_m_needs_a_dep(self):
+        result = self._validate(self.SUBPROCESS, "[]")
+        self.assertFalse(result.ok)
+        self.assertIn("test_main.py runs 'app.main' (//app:main), not in deps", result.message)
+
+    def test_declaring_the_dep_satisfies_it(self):
+        self.assertTrue(self._validate(self.SUBPROCESS, '[":main"]').ok)
+
+    def test_a_tuple_argv_counts_too(self):
+        body = "import subprocess, sys\nARGV = (sys.executable, '-m', 'app.main')\n"
+        self.assertFalse(self._validate(body, "[]").ok)
+
+    def test_runpy_run_module_counts_too(self):
+        body = "import runpy\nrunpy.run_module('app.main', run_name='__main__')\n"
+        self.assertFalse(self._validate(body, "[]").ok)
+
+    def test_a_dash_m_naming_no_repo_module_is_ignored(self):
+        body = "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'pip', '--version'])\n"
+        self.assertTrue(self._validate(body, "[]").ok)
 
 
 if __name__ == "__main__":

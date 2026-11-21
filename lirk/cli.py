@@ -102,7 +102,50 @@ def _expand_pattern(graph: Graph, pattern: str) -> tuple[set[str], bool]:
             f"malformed label {pattern!r}: expected //package:name, "
             "//package:all, //package/... or //..."
         )
-    raise LabelError(f"unknown target: {pattern}")
+    raise LabelError(f"unknown target: {pattern}{_suggest(graph, pattern)}")
+
+
+def _suggest(graph: Graph, pattern: str) -> str:
+    """A " -- did you mean ...?" suffix for a mistyped label, or ""."""
+    import difflib  # only paid for on the error path
+
+    # Same package first: a typo in the name part is the common case, and
+    # repo-wide matches for it are noise (//a:a_lbi is not //c:c_lib).
+    package = pattern[2:].rpartition(":")[0]
+    same = [l for l in graph.targets if l.startswith(f"//{package}:")]
+
+    def best(candidates: list[str], cutoff: float) -> list[str]:
+        scored = sorted(
+            ((difflib.SequenceMatcher(None, pattern, c).ratio(), c) for c in candidates),
+            reverse=True,
+        )
+        if not scored or scored[0][0] < cutoff:
+            return []
+        # Only near-ties with the best: one good guess beats three vague ones.
+        return [c for r, c in scored[:3] if r >= scored[0][0] - 0.05]
+
+    close = best(same, 0.6) or best(list(graph.targets), 0.75)
+    return f" -- did you mean {' or '.join(close)}?" if close else ""
+
+
+def _tests_of(graph: Graph, label: str) -> list[str]:
+    """Test targets that depend on `label`, directly or not -- almost
+    always what was meant when a library is passed to `lirk test`."""
+    package = graph.targets[label].package
+    tests = [
+        t for t, target in graph.targets.items()
+        if target.type == "test" and label in transitive_closure(graph, {t})
+    ]
+    # Nearest first: the same package's tests, then direct dependents,
+    # then everything further away.
+    return sorted(
+        tests,
+        key=lambda t: (
+            graph.targets[t].package != package,
+            label not in graph.edges[t],
+            t,
+        ),
+    )
 
 
 def _select_roots(graph: Graph, patterns: list[str], mode: str) -> set[str]:
@@ -119,7 +162,13 @@ def _select_roots(graph: Graph, patterns: list[str], mode: str) -> set[str]:
                 (label,) = matched
                 type_ = graph.targets[label].type
                 if type_ != "test":
-                    raise LabelError(f"{label} is type {type_!r}, not 'test'")
+                    tests = _tests_of(graph, label)
+                    hint = ""
+                    if tests:
+                        shown = ", ".join(tests[:5])
+                        more = f" and {len(tests) - 5} more" if len(tests) > 5 else ""
+                        hint = f" -- its tests: {shown}{more}"
+                    raise LabelError(f"{label} is type {type_!r}, not 'test'{hint}")
             matched = {l for l in matched if graph.targets[l].type == "test"}
         roots |= matched
     return roots
@@ -601,8 +650,8 @@ def cmd_verify(
             print(f"  {entry}")
         print(
             "lirk: an input these targets depend on is not in their "
-            "fingerprint -- often a file read at runtime but not declared "
-            "in `data`"
+            "fingerprint -- usually a file read at runtime but not declared "
+            "in `data`, or a script a test runs by path rather than with -m"
         )
     print(
         f"lirk: {verified} verified, {len(stale)} stale, "
@@ -655,6 +704,10 @@ def cmd_fix(root: Path, labels: list[str], dry_run: bool = False) -> int:
     return 1 if applied.manual else 0
 
 
+def _count(items: list, noun: str) -> str:
+    return f"{len(items)} {noun}{'' if len(items) == 1 else 's'}"
+
+
 def cmd_init(root: Path, dry_run: bool = False) -> int:
     """Draft BUILD.lirk files for every package without one, then let
     `fix`'s planner add the deps their imports call for.
@@ -665,9 +718,12 @@ def cmd_init(root: Path, dry_run: bool = False) -> int:
     from lirk.fix import apply_plan, plan_fixes
     from lirk.scaffold import draft_packages, write_drafts
 
-    drafts, kept = draft_packages(root)
+    drafts, kept, skipped = draft_packages(root)
     for package in kept:
         print(f"  kept   {package or '(root)'}/{BUILD_FILENAME}: already exists", flush=True)
+    for directory, reason in skipped:
+        print(f"  skipped {directory}/: {reason} (write its BUILD.lirk by hand if it's code)",
+              flush=True)
     if not drafts:
         print("lirk: nothing to draft -- every package with Python files has a BUILD.lirk")
         return 0
@@ -675,12 +731,18 @@ def cmd_init(root: Path, dry_run: bool = False) -> int:
     for d in drafts:
         parts = []
         if d.srcs:
-            parts.append(f"library :{d.name} ({len(d.srcs)} srcs)")
+            parts.append(f"library :{d.name} ({_count(d.srcs, 'src')})")
         if d.tests:
-            parts.append(f"test :{d.name}_test ({len(d.tests)} srcs, {d.runner})")
+            parts.append(f"test :{d.name}_test ({_count(d.tests, 'src')}, {d.runner})")
         where = f"{d.package}/{BUILD_FILENAME}" if d.package else BUILD_FILENAME
         verb = "would create" if dry_run else "created"
         print(f"  {verb} {where}: {'; '.join(parts)}", flush=True)
+        for hint in d.data_hints:
+            print(
+                f"  hint   {d.package or '(root)'}/{hint}/ holds no Python: if tests "
+                f"read it, add data = [\"{hint}\"] to the test target",
+                flush=True,
+            )
 
     if dry_run:
         print(

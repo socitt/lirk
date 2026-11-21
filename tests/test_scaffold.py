@@ -29,7 +29,7 @@ class DraftPackagesTests(unittest.TestCase):
         path.write_text(body)
 
     def _drafts(self):
-        drafts, kept = draft_packages(self.root)
+        drafts, kept, self.skipped = draft_packages(self.root)
         return {d.package: d for d in drafts}, kept
 
     def test_splits_library_and_test_files(self):
@@ -70,10 +70,31 @@ class DraftPackagesTests(unittest.TestCase):
     def test_environments_generated_and_hidden_directories_are_skipped(self):
         self._file("venvlike/pyvenv.cfg")
         self._file("venvlike/lib/site.py")
-        for d in ("build", "dist", "node_modules", "__pycache__", ".hidden", "venv"):
+        for d in ("build", "dist", "node_modules", "__pycache__", ".hidden"):
             self._file(f"{d}/x.py")
         self._file("real/x.py")
         self.assertEqual(set(self._drafts()[0]), {"real"})
+        # The ones a person might have meant as code are named, with why.
+        self.assertEqual(
+            sorted(self.skipped),
+            [("build", "looks like build output"), ("dist", "looks like build output"),
+             ("venvlike", "a virtualenv")],
+        )
+
+    def test_packages_named_env_or_venv_are_ordinary_code(self):
+        # slingshot has an env/ package (RL environments); it was dropped
+        # silently by name. Only a pyvenv.cfg marks a virtualenv.
+        self._file("env/navigation.py")
+        self._file("venv/x.py")
+        self.assertEqual(set(self._drafts()[0]), {"env", "venv"})
+
+    def test_a_subdirectory_without_python_is_hinted_as_data(self):
+        self._file("golden/test_golden.py", UNITTEST_MODULE)
+        self._file("golden/data/physics/case1.json", "{}")
+        self._file("golden/helpers/util.py")
+        self._file("golden/empty/.keep")
+        d = self._drafts()[0]["golden"]
+        self.assertEqual(d.data_hints, ["data"])
 
     def test_ignore_list_is_honoured(self):
         self._file(".lirk-root", 'ignore = ["vendor"]\n')

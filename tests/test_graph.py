@@ -201,5 +201,35 @@ class TransitiveClosureTests(unittest.TestCase):
         )
 
 
+class InputsInsideRepoTests(unittest.TestCase):
+    """srcs/data may cross packages but never leave the repo (found by
+    slingshot: an out-of-repo data path was silently accepted)."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        (self.root / "a").mkdir(parents=True)
+        (self.root / "shared").mkdir()
+        (self.root / "a" / "a.py").write_text("")
+
+    def _graph_with(self, data):
+        (self.root / "a" / "BUILD.lirk").write_text(
+            f'[[target]]\nname = "a"\ntype = "library"\nsrcs = ["a.py"]\ndata = ["{data}"]\n'
+        )
+        return build_graph(self.root)
+
+    def test_another_packages_directory_is_fine(self):
+        self._graph_with("../shared")
+
+    def test_a_path_escaping_the_repo_is_rejected(self):
+        with self.assertRaisesRegex(GraphError, "data entry '../../elsewhere' is outside the repo root"):
+            self._graph_with("../../elsewhere")
+
+    def test_an_absolute_path_is_rejected(self):
+        with self.assertRaisesRegex(GraphError, "outside the repo root"):
+            self._graph_with("/etc")
+
+
 if __name__ == "__main__":
     unittest.main()
