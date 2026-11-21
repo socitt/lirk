@@ -20,7 +20,7 @@ Python 3.11 or newer. Nothing else — lirk has no third-party
 dependencies.
 
 ```sh
-pip install git+https://github.com/socitt/lirk.git
+pip install lirk
 ```
 
 That puts a `lirk` console script on your `PATH`. To check:

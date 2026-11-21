@@ -331,7 +331,9 @@ for effort.
   in `.lirk-root`'s `ignore` silently excludes nothing, and the
   failure then shows up as a confusing graph error from the very
   fixtures it was meant to hide.
-- [ ] **F9 — Publish to PyPI after the v1 tag.** `pip install lirk`
+- [~] **F9 — Publish to PyPI after the v1 tag.** *In progress
+  2026-11-21:* trusted-publishing workflow and packaging metadata ready
+  (`docs/RELEASING.md`); the first upload will be 1.0.1. Original note: `pip install lirk`
   rather than a git URL. Packaging is already in place.
 - [ ] **F10 — L7 (ancestor `__init__.py`).** Already tracked above;
   listed here so the whole "what next" picture is in one place. Still

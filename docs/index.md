@@ -43,7 +43,7 @@ Requires Python 3.11 or newer and nothing else — no third-party
 dependencies.
 
 ```sh
-pip install git+https://github.com/socitt/lirk.git
+pip install lirk
 ```
 
 Or from a clone, for development:

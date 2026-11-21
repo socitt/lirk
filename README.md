@@ -86,20 +86,18 @@ and nothing fancier.
 
 ## Installation
 
-lirk isn't published to PyPI yet. Install straight from the git repo
-with pip (Python 3.11+, no other dependencies):
+Python 3.11+, no other dependencies:
 
 ```
-pip install git+https://github.com/socitt/lirk.git
+pip install lirk
 ```
 
-Or clone and install from a local checkout — useful for working on
-lirk itself:
+Or from a checkout, which is useful for working on lirk itself:
 
 ```
 git clone https://github.com/socitt/lirk.git
 cd lirk
-pip install .          # or: pip install -e .   (editable, for development)
+pip install -e .
 ```
 
 Either way installs a `lirk` console script on `PATH`:
