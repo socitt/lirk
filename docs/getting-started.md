@@ -409,6 +409,26 @@ so the subprocess finds the package the same way your tests do. Keep
 the `timeout=` — lirk's own test timeout can only kill its direct
 child, so a wedged grandchild is yours to bound.
 
+### Using pytest
+
+If your tests are written for pytest, add `runner = "pytest"` to each
+`test` target. Fixtures, `assert` rewriting and `conftest.py` all work
+as usual, because lirk simply runs `python3 -m pytest <src>` once per
+src. pytest has to be installed for the same interpreter that runs
+lirk.
+
+Two things differ from running pytest yourself:
+
+- **conftest and config files count as inputs.** Every `conftest.py`
+  and pytest config file between the package and the repo root goes
+  into the target's fingerprint, so editing one re-runs the tests
+  rather than leaving a stale `cached`. A conftest's imports also need
+  `deps`, just like a src's: if your root `conftest.py` does `from app
+  import factory`, every pytest target under it needs `//app:app`.
+- **No `.pytest_cache`.** lirk passes `-p no:cacheprovider`, so
+  `--lf`-style state isn't written into your source tree. lirk's own
+  cache already skips anything that passed.
+
 ### Excluding directories that aren't yours
 
 Directories starting with `.` are skipped automatically. For anything

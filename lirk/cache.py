@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 from lirk.graph import Graph
+from lirk.targets import DEFAULT_RUNNER, pytest_inputs
 
 CACHE_FILENAME = ".lirk-cache.json"
 
@@ -154,6 +155,16 @@ def compute_fingerprints(
             # budget says nothing about a 5s one, so changing it must
             # invalidate the cached result.
             h.update(f"timeout={target.timeout}".encode())
+        if target.runner != DEFAULT_RUNNER:
+            # Same rule as timeout: absent for default-runner targets, so
+            # their fingerprints are unchanged. A pytest target also
+            # folds in the conftest/config files pytest reads, which are
+            # not srcs but change what the tests do.
+            h.update(f"runner={target.runner}".encode())
+            for path in pytest_inputs(target, root):
+                rel = path.relative_to(root.resolve()).as_posix()
+                h.update(f"pytest-input={rel}".encode())
+                h.update(_hash_file(path, label).encode())
 
         for src in sorted(target.srcs):
             src_path = root / target.package / src

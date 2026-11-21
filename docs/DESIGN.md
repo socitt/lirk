@@ -96,8 +96,9 @@ data = ["fixture.txt"]
 
 Fields (`lirk/targets.py`): `name` (required, non-empty, unique per
 file), `type` (required, `library` or `test`), `srcs`, `deps`, `data`
-(all default `[]`), and `timeout` (`test` only, optional positive
-integer seconds; see §5). A repeated entry within `srcs`, `deps` or
+(all default `[]`), `timeout` (`test` only, optional positive integer
+seconds; see §5), and `runner` (`test` only, `unittest` or `pytest`,
+default `unittest`; see §5). A repeated entry within `srcs`, `deps` or
 `data` is rejected — a repeated test src would run twice. Unknown keys are **rejected** at parse time — a
 transposed `dpes` used to silently produce a target with no dependency
 edges, which meant changes to the real dependency never invalidated it.
@@ -366,7 +367,8 @@ having actually run it. This guards a bug that really shipped.
 
 1. target `name` and `type`
 2. `ACTION_VERSION`, then the **environment fingerprint**, then
-   `timeout` **only if set** — so a target without one keeps the
+   `timeout` **only if set**, then `runner` and its **pytest inputs**
+   only if it isn't `unittest` — so a target using neither keeps the
    fingerprint shape it always had
 3. each `srcs` entry, **sorted**: filename + SHA-256 of contents
 4. each `data` entry, sorted: name, then either its SHA-256 (a file)
@@ -514,6 +516,37 @@ subprocess.run(
   anchored at a line start, counts: a test that drives unittest itself
   can echo an inner run's `Ran 0 tests` before its own summary.
 
+**`runner = "pytest"`** swaps the argv for `[sys.executable, "-m",
+"pytest", "-p", "no:cacheprovider", src]` and changes nothing else about
+the call: same `cwd`, `env`, `stdin`, `timeout`, one call per src. It
+exists because most Python repos use pytest, which made unittest-only
+the largest single adoption barrier. Three decisions came with it:
+
+- **pytest's implicit inputs are fingerprinted, not required to be
+  declared.** `targets.pytest_inputs` collects every `conftest.py`,
+  `pytest.ini`, `pyproject.toml`, `tox.ini` and `setup.cfg` from the
+  package directory up to the repo root. These change what tests do,
+  so leaving them out would be a stale-PASS path. Requiring them in
+  `data` was the alternative, but a root `pyproject.toml` would then
+  need a `../../pyproject.toml` entry on every target, and forgetting it
+  would be silent — the very failure mode the fingerprint exists to
+  rule out. This is the one implicit input in the model, and it is
+  bounded: a fixed set of names, on one path, found by stat alone (no
+  `ast` in fingerprinting). Coarse by design: an unrelated edit to a
+  root `pyproject.toml` reruns every pytest target.
+- **conftest modules are import-checked like srcs.** pytest imports
+  them before any test, so an import a conftest makes outside the
+  closure is the same unfingerprinted input as a src's. Messages name
+  the conftest relative to the package (`../conftest.py imports ...`).
+- **No-tests detection uses pytest's exit code 5**, which unlike
+  unittest on 3.11 is reliable on every version. `-p no:cacheprovider`
+  keeps pytest from writing `.pytest_cache` into the source tree as a
+  side effect of a run.
+
+Not modelled: a pytest rootdir *above* the repo root (an ini file
+further up the filesystem), which could pull in a conftest from outside
+the repo.
+
 **Test output is passed through raw**, unsummarized and unreformatted.
 Two independent assessments identified this as a practical strength.
 Resist adding an interpreting layer.
@@ -617,6 +650,7 @@ Tests are plain `unittest`, run with
 | `multisrc_repo` | Multi-src library and test targets; later failures not hidden by earlier ones |
 | `data_dep_repo` | `data` field: fingerprinted, not syntax-checked |
 | `datadir_repo` | `data` naming a directory: recursive fingerprint, add/remove detection, `__pycache__` exclusion |
+| `pytest_repo` | `runner = "pytest"`: pass, fail, nothing collected, a conftest fixture |
 | `hang_repo` | Test timeout path, that a timeout doesn't abandon later srcs, a per-target `timeout`, and partial output from a timed-out src |
 | `no_tests_repo` | A test module defining no tests fails rather than passing |
 | `stdin_repo` | Child does not inherit lirk's stdin |

@@ -13,7 +13,16 @@ from pathlib import Path
 BUILD_FILENAME = "BUILD.lirk"
 ROOT_MARKER = ".lirk-root"
 VALID_TYPES = {"library", "test"}
-KNOWN_KEYS = {"name", "type", "srcs", "deps", "data", "timeout"}
+KNOWN_KEYS = {"name", "type", "srcs", "deps", "data", "timeout", "runner"}
+VALID_RUNNERS = {"unittest", "pytest"}
+DEFAULT_RUNNER = "unittest"
+
+# Files pytest reads from a test's directory and every ancestor: conftest
+# modules, and the config files it consults for rootdir and ini options.
+# They change what a test does without being srcs, so a pytest target
+# fingerprints every one that exists between its package and the repo
+# root (see pytest_inputs).
+PYTEST_CONFIG_FILES = ("conftest.py", "pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg")
 ROOT_CONFIG_KEYS = {"ignore"}
 
 
@@ -71,10 +80,40 @@ class Target:
     # Per-src test timeout in seconds; None means the global default
     # (actions.TEST_TIMEOUT_SECONDS). Only valid on `test` targets.
     timeout: int | None = None
+    # How a `test` target's srcs are run; always DEFAULT_RUNNER for a
+    # library.
+    runner: str = DEFAULT_RUNNER
 
     @property
     def label(self) -> str:
         return f"//{self.package}:{self.name}"
+
+
+def pytest_inputs(target: Target, root: Path) -> list[Path]:
+    """Every PYTEST_CONFIG_FILES file pytest may read for this target:
+    those in its package directory and each ancestor up to and
+    including the repo root, nearest first. Empty for a non-pytest
+    target.
+
+    Bounded at the repo root because lirk's fingerprint and import check
+    are scoped there. pytest itself can read a conftest above it only
+    if its rootdir lands above the repo, i.e. an ini file further up --
+    a setup this does not model.
+    """
+    if target.runner != "pytest":
+        return []
+    root = root.resolve()
+    directory = (root / target.package).resolve()
+    found: list[Path] = []
+    while True:
+        found.extend(
+            directory / name
+            for name in PYTEST_CONFIG_FILES
+            if (directory / name).is_file()
+        )
+        if directory == root or root not in directory.parents:
+            return found
+        directory = directory.parent
 
 
 def parse_build_file(path: Path, package: str) -> list[Target]:
@@ -174,6 +213,17 @@ def _parse_target(raw: dict, path: Path, package: str, index: int) -> Target:
                 f"{type_!r} target runs nothing"
             )
 
+    runner = raw.get("runner", DEFAULT_RUNNER)
+    if runner not in VALID_RUNNERS:
+        raise ConfigError(
+            f"{where}: 'runner' must be one of {sorted(VALID_RUNNERS)}, got {runner!r}"
+        )
+    if "runner" in raw and type_ != "test":
+        raise ConfigError(
+            f"{where}: 'runner' only applies to 'test' targets -- a "
+            f"{type_!r} target runs nothing"
+        )
+
     return Target(
         name=name,
         type=type_,
@@ -182,6 +232,7 @@ def _parse_target(raw: dict, path: Path, package: str, index: int) -> Target:
         data=tuple(data),
         package=package,
         timeout=timeout,
+        runner=runner,
     )
 
 

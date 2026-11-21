@@ -273,5 +273,54 @@ class EnvironmentFingerprintTests(unittest.TestCase):
             self.assertNotEqual(one[label], two[label], label)
 
 
+class PytestFingerprintTests(unittest.TestCase):
+    """Files pytest reads but which are not srcs must still invalidate."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name)
+        (self.root / "pkg").mkdir()
+        (self.root / "pkg" / "test_x.py").write_text("def test_x():\n    pass\n")
+        self._write_build('runner = "pytest"\n')
+
+    def _write_build(self, extra):
+        (self.root / "pkg" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "t"\ntype = "test"\nsrcs = ["test_x.py"]\n' + extra
+        )
+
+    def _fp(self):
+        graph = build_graph(self.root)
+        return compute_fingerprints(graph, self.root, topological_sort(graph), environment="e")["//pkg:t"]
+
+    def test_editing_a_package_conftest_invalidates(self):
+        (self.root / "pkg" / "conftest.py").write_text("A = 1\n")
+        before = self._fp()
+        (self.root / "pkg" / "conftest.py").write_text("A = 2\n")
+        self.assertNotEqual(before, self._fp())
+
+    def test_adding_a_root_conftest_invalidates(self):
+        before = self._fp()
+        (self.root / "conftest.py").write_text("")
+        self.assertNotEqual(before, self._fp())
+
+    def test_editing_root_pytest_config_invalidates(self):
+        (self.root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+        before = self._fp()
+        (self.root / "pyproject.toml").write_text("[tool.pytest.ini_options]\naddopts = '-x'\n")
+        self.assertNotEqual(before, self._fp())
+
+    def test_switching_runner_invalidates(self):
+        before = self._fp()
+        self._write_build("")
+        self.assertNotEqual(before, self._fp())
+
+    def test_unittest_target_ignores_conftest(self):
+        self._write_build("")
+        before = self._fp()
+        (self.root / "conftest.py").write_text("")
+        self.assertEqual(before, self._fp())
+
+
 if __name__ == "__main__":
     unittest.main()
