@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-11-21): 272 tests, `python3 -m
+Last verified against source (2026-11-21): 283 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
 `lirk build //...` (19 targets) and `lirk test //...` (8 test targets)
 — which runs alongside the unittest invocation rather than replacing
@@ -305,14 +305,14 @@ for effort.
   //a:a_test (12.4s)`. Cheap (one `time.monotonic()` around the
   existing call), and it is the data you need to choose a sensible
   `timeout` and to find the slow target in a suite.
-- [ ] **F3 — Repo-wide default `timeout` in `.lirk-root`.** For
+- [x] **F3 — Repo-wide default `timeout` in `.lirk-root`.** For
   example `timeout = 60`, so the 600s fallback can be lowered once
   rather than per target. A per-target value still wins. It would
   need to enter the fingerprint the same way the per-target one does.
-- [ ] **F4 — `--fail-fast`.** Stop after the first FAIL. Keep-going
+- [x] **F4 — `--fail-fast`.** Stop after the first FAIL. Keep-going
   stays the default (it is the deliberate behaviour per §5), but on a
   phone a long suite with a broken core library is mostly waiting.
-- [ ] **F5 — Prune dead cache entries.** `.lirk-cache.json` keeps
+- [x] **F5 — Prune dead cache entries.** `.lirk-cache.json` keeps
   entries for targets that were deleted or renamed, forever. Drop keys
   whose label is no longer in the graph when saving. This is safe
   because only labels absent from the *whole* graph are dropped, never
@@ -327,7 +327,7 @@ for effort.
   argument, not a process-model change). A filtered run must **never**
   be written to the cache, or it would record a partial pass as a full
   one.
-- [ ] **F8 — Flag `ignore` entries that match nothing.** A typo'd path
+- [x] **F8 — Flag `ignore` entries that match nothing.** A typo'd path
   in `.lirk-root`'s `ignore` silently excludes nothing, and the
   failure then shows up as a confusing graph error from the very
   fixtures it was meant to hide.
@@ -359,6 +359,16 @@ The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
    concurrent runs become a real workflow.
 
 ## Recently closed
+
+- **Quick wins F3, F4, F5, F8** (2026-11-21).
+  - **F4 `--fail-fast`** on `build` and `test`: stops before starting
+    anything new after a failure, and counts what was not run.
+  - **F3 repo-wide `timeout`** in `.lirk-root`, applied to the `Target`
+    at load time, so the effective timeout is what gets fingerprinted.
+    A target's own setting wins.
+  - **F5:** cache entries for targets absent from the *whole* graph are
+    dropped on save, never ones merely outside the run's selection.
+  - **F8:** an `ignore` entry matching no directory warns on stderr.
 
 - **Scale benchmark, and two hotspots fixed** (2026-11-21). `bench/`
   generates repos of any size and shape (wide, deep, mesh) where every

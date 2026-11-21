@@ -92,14 +92,22 @@ starts subprocesses of its own, give those their own timeouts.
 
 Put this file at the top of your repo. lirk finds the repo root by
 looking for it in the current directory and its parents, so commands
-work from any subdirectory. It's usually empty. Its one setting is:
+work from any subdirectory. It's usually empty. It has two optional
+settings:
 
 ```toml
 ignore = ["vendor", "tests/fixtures"]
+timeout = 120
 ```
 
-Each entry is a directory, relative to the repo root, whose
-`BUILD.lirk` files (and everything beneath it) lirk should skip. Use it
+**`timeout`** is the default time limit, in seconds, for every test
+target that doesn't set its own (otherwise 600). Changing it reruns the
+tests it applies to.
+
+**`ignore`** lists directories, relative to the repo root, whose
+`BUILD.lirk` files (and everything beneath them) lirk should skip. An
+entry that matches no directory prints a warning, since it's almost
+always a typo. Use it
 for vendored code, nested checkouts, or test fixtures that contain
 BUILD files of their own. Hidden directories (starting with `.`) are
 always skipped.

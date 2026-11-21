@@ -13,10 +13,16 @@ from __future__ import annotations
 
 import os
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from lirk.targets import BUILD_FILENAME, Target, load_ignores, parse_build_file
+from lirk.targets import (
+    BUILD_FILENAME,
+    RootConfig,
+    Target,
+    load_root_config,
+    parse_build_file,
+)
 
 
 class GraphError(Exception):
@@ -57,12 +63,22 @@ def package_for(build_file: Path, root: Path) -> str:
     return "" if rel_dir == Path(".") else rel_dir.as_posix()
 
 
-def load_targets(root: Path) -> dict[str, Target]:
-    """Parse every BUILD.lirk under root, keyed by fully-qualified label."""
+def load_targets(root: Path, config: RootConfig | None = None) -> dict[str, Target]:
+    """Parse every BUILD.lirk under root, keyed by fully-qualified label.
+
+    A test target with no `timeout` of its own takes .lirk-root's, if
+    set. Applied here, to the Target itself, so the effective timeout is
+    what gets fingerprinted: changing the repo default reruns exactly
+    the tests it governs.
+    """
+    if config is None:
+        config = load_root_config(root)
     targets: dict[str, Target] = {}
-    for build_file in find_build_files(root, load_ignores(root)):
+    for build_file in find_build_files(root, config.ignore):
         package = package_for(build_file, root)
         for target in parse_build_file(build_file, package):
+            if target.type == "test" and target.timeout is None and config.timeout:
+                target = replace(target, timeout=config.timeout)
             if target.label in targets:
                 raise GraphError(f"duplicate target label {target.label!r}")
             targets[target.label] = target
@@ -99,10 +115,13 @@ def resolve_label(raw_dep: str, package: str) -> str:
 class Graph:
     targets: dict[str, Target]
     edges: dict[str, tuple[str, ...]]  # label -> resolved dependency labels
+    # Problems worth telling the user about that don't stop the build.
+    warnings: list[str] = field(default_factory=list)
 
 
 def build_graph(root: Path) -> Graph:
-    targets = load_targets(root)
+    config = load_root_config(root)
+    targets = load_targets(root, config)
     edges: dict[str, tuple[str, ...]] = {}
 
     for label, target in targets.items():
@@ -116,7 +135,15 @@ def build_graph(root: Path) -> Graph:
             resolved.append(dep_label)
         edges[label] = tuple(resolved)
 
-    return Graph(targets=targets, edges=edges)
+    # An ignore entry naming nothing is almost always a typo, and fails
+    # silently: the directory it meant to hide is scanned after all,
+    # usually surfacing as a confusing graph error from fixtures.
+    warnings = [
+        f".lirk-root: ignore entry {entry!r} matches no directory"
+        for entry in config.ignore
+        if not (root / entry.strip("/")).is_dir()
+    ]
+    return Graph(targets=targets, edges=edges, warnings=warnings)
 
 
 def topological_sort(graph: Graph) -> list[str]:

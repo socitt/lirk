@@ -23,31 +23,50 @@ DEFAULT_RUNNER = "unittest"
 # fingerprints every one that exists between its package and the repo
 # root (see pytest_inputs).
 PYTEST_CONFIG_FILES = ("conftest.py", "pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg")
-ROOT_CONFIG_KEYS = {"ignore"}
+ROOT_CONFIG_KEYS = {"ignore", "timeout"}
 
 
 class ConfigError(Exception):
     """A BUILD.lirk file is missing, malformed, or invalid."""
 
 
+@dataclass(frozen=True)
+class RootConfig:
+    """Repo-level settings from .lirk-root. See load_root_config."""
+
+    ignore: tuple[str, ...] = ()
+    # Default per-src timeout for test targets that don't set their own.
+    timeout: int | None = None
+
+
 def load_ignores(root: Path) -> tuple[str, ...]:
-    """Read the optional `ignore` list from the repo's .lirk-root marker.
+    """The `ignore` list from .lirk-root; see load_root_config."""
+    return load_root_config(root).ignore
+
+
+def load_root_config(root: Path) -> RootConfig:
+    """Read the optional settings in the repo's .lirk-root marker.
 
     The marker doubles as repo-level config: an empty file means "the
     root is here" and nothing more, which is what it meant before this
     existed, so existing repos are unaffected. TOML content adds to it:
 
         ignore = ["tests/fixtures", "vendor"]
+        timeout = 120
 
-    Each entry is a directory path relative to the repo root, excluded
-    from the BUILD.lirk scan along with everything beneath it. This is
-    for directories that legitimately contain BUILD.lirk files that are
-    not this repo's targets -- test fixtures, a vendored dependency, a
-    nested checkout -- which the dot-prefix rule alone cannot express.
+    Each `ignore` entry is a directory path relative to the repo root,
+    excluded from the BUILD.lirk scan along with everything beneath it.
+    This is for directories that legitimately contain BUILD.lirk files
+    that are not this repo's targets -- test fixtures, a vendored
+    dependency, a nested checkout -- which the dot-prefix rule alone
+    cannot express.
+
+    `timeout` is the default for every `test` target that sets none of
+    its own, replacing the built-in 600s.
     """
     marker = root / ROOT_MARKER
     if not marker.is_file():
-        return ()
+        return RootConfig()
 
     try:
         with marker.open("rb") as f:
@@ -66,7 +85,19 @@ def load_ignores(root: Path) -> tuple[str, ...]:
                 f"{marker}: ignore entry {entry!r} must be a path relative to "
                 "the repo root, without '..'"
             )
-    return tuple(ignore)
+    timeout = data.get("timeout")
+    if timeout is not None:
+        _check_timeout(timeout, str(marker))
+    return RootConfig(ignore=tuple(ignore), timeout=timeout)
+
+
+def _check_timeout(value: object, where: str) -> None:
+    # bool is an int subclass in Python, and `timeout = true` must not
+    # quietly mean one second.
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ConfigError(
+            f"{where}: 'timeout' must be a positive integer number of seconds"
+        )
 
 
 @dataclass(frozen=True)
@@ -217,12 +248,7 @@ def _parse_target(raw: dict, path: Path, package: str, index: int) -> Target:
 
     timeout = raw.get("timeout")
     if timeout is not None:
-        # bool is an int subclass in Python, and `timeout = true` must
-        # not quietly mean one second.
-        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
-            raise ConfigError(
-                f"{where}: 'timeout' must be a positive integer number of seconds"
-            )
+        _check_timeout(timeout, where)
         if type_ != "test":
             raise ConfigError(
                 f"{where}: 'timeout' only applies to 'test' targets -- a "

@@ -154,6 +154,8 @@ def _load_graph(root: Path) -> tuple[Graph, list[str]] | None:
         # fault is that //orrery is no longer inside the repo.
         print(f"lirk: repo root is {root}", file=sys.stderr)
         return None
+    for warning in graph.warnings:
+        print(f"lirk: warning: {warning}", file=sys.stderr)
     return graph, order
 
 
@@ -167,6 +169,9 @@ class ExecutionSummary:
     tests_failed: int = 0
     tests_cached: int = 0
     tests_skipped: int = 0
+    # Targets never reached because --fail-fast stopped the run.
+    not_run: int = 0
+    tests_not_run: int = 0
     # Labels that actually FAILed, in the order reported. Skipped
     # dependents are deliberately not in here: they are consequences,
     # and listing them buries the labels worth acting on.
@@ -181,11 +186,17 @@ class ExecutionSummary:
             + self.tests_failed
             + self.tests_cached
             + self.tests_skipped
+            + self.tests_not_run
         )
 
 
 def _execute(
-    root: Path, graph: Graph, order: list[str], mode: str, force: bool = False
+    root: Path,
+    graph: Graph,
+    order: list[str],
+    mode: str,
+    force: bool = False,
+    fail_fast: bool = False,
 ) -> tuple[bool, ExecutionSummary]:
     """Validate (and, in 'test' mode, run) each target in `order`.
 
@@ -267,7 +278,22 @@ def _execute(
     # most that interval of cheap validations, never a test result.
     last_save = time.monotonic()
     try:
-        for label in order:
+        for position, label in enumerate(order):
+            if fail_fast and summary.failures:
+                # Stop before starting anything new. Counted, not listed:
+                # the point of --fail-fast is a short screen.
+                rest = order[position:]
+                summary.not_run = len(rest)
+                summary.tests_not_run = sum(
+                    1 for l in rest
+                    if mode == "test" and graph.targets[l].type == "test"
+                )
+                print(
+                    f"lirk: stopped at the first failure (--fail-fast); "
+                    f"{len(rest)} target(s) not run",
+                    flush=True,
+                )
+                break
             target = graph.targets[label]
             is_test = mode == "test" and target.type == "test"
             # The key names the *action*, not the command: validating a target
@@ -344,6 +370,12 @@ def _execute(
                     if stream.strip():
                         print(stream.rstrip(), flush=True)
     finally:
+        # Entries for targets that no longer exist anywhere in the repo
+        # (deleted or renamed) would otherwise accumulate forever. Only
+        # labels absent from the *whole* graph are dropped -- never ones
+        # merely outside this run's selection.
+        for key in [k for k in cache if k.partition(":")[2] not in graph.targets]:
+            del cache[key]
         # Always, once: covers whatever the interval held back, an
         # interruption mid-run, and a run where nothing passed (which
         # still leaves a cache file, as it always has).
@@ -409,7 +441,9 @@ def _resolve_roots(
     return graph, order, roots
 
 
-def cmd_build(root: Path, labels: list[str], force: bool = False) -> int:
+def cmd_build(
+    root: Path, labels: list[str], force: bool = False, fail_fast: bool = False
+) -> int:
     resolved = _resolve_roots(root, labels, "build")
     if resolved is None:
         return 1
@@ -418,17 +452,22 @@ def cmd_build(root: Path, labels: list[str], force: bool = False) -> int:
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
 
-    ok, summary = _execute(root, graph, subset_order, mode="build", force=force)
+    ok, summary = _execute(
+        root, graph, subset_order, mode="build", force=force, fail_fast=fail_fast
+    )
     _print_failures(summary)
     print(
         f"lirk: {summary.built} built, {summary.cached} cached, "
         f"{summary.failed} failed, {summary.skipped} skipped"
+        + (f", {summary.not_run} not run" if summary.not_run else "")
     )
     print("lirk: OK" if ok else "lirk: FAILED")
     return 0 if ok else 1
 
 
-def cmd_test(root: Path, labels: list[str], force: bool = False) -> int:
+def cmd_test(
+    root: Path, labels: list[str], force: bool = False, fail_fast: bool = False
+) -> int:
     resolved = _resolve_roots(root, labels, "test")
     if resolved is None:
         return 1
@@ -445,7 +484,9 @@ def cmd_test(root: Path, labels: list[str], force: bool = False) -> int:
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
 
-    ok, summary = _execute(root, graph, subset_order, mode="test", force=force)
+    ok, summary = _execute(
+        root, graph, subset_order, mode="test", force=force, fail_fast=fail_fast
+    )
     _print_slowest(summary)
     _print_failures(summary)
     passed = summary.tests_passed + summary.tests_cached
@@ -742,6 +783,10 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         "--force", "--rebuild", action="store_true", dest="force",
         help="bypass the cache and re-validate every target in scope",
     )
+    build_p.add_argument(
+        "--fail-fast", action="store_true",
+        help="stop at the first failure instead of checking everything",
+    )
     build_p.add_argument("--root", type=Path, default=None, help=root_help)
 
     test_p = sub.add_parser("test", help="run test targets")
@@ -749,6 +794,10 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     test_p.add_argument(
         "--force", "--rerun", action="store_true", dest="force",
         help="bypass the cache and re-run every test in scope",
+    )
+    test_p.add_argument(
+        "--fail-fast", action="store_true",
+        help="stop at the first failure instead of running everything",
     )
     test_p.add_argument("--root", type=Path, default=None, help=root_help)
 
@@ -815,7 +864,7 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
                 )
 
     if args.command == "build":
-        return cmd_build(root, args.labels, force=args.force)
+        return cmd_build(root, args.labels, force=args.force, fail_fast=args.fail_fast)
     if args.command == "clean":
         return cmd_clean(root)
     if args.command == "init":
@@ -826,7 +875,7 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         if args.sample is not None and args.sample < 1:
             parser.error("--sample must be at least 1")
         return cmd_verify(root, args.labels, sample=args.sample, seed=args.seed)
-    return cmd_test(root, args.labels, force=args.force)
+    return cmd_test(root, args.labels, force=args.force, fail_fast=args.fail_fast)
 
 
 if __name__ == "__main__":
