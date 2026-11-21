@@ -1,4 +1,5 @@
 import importlib.util
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -552,6 +553,25 @@ class PytestRunnerTests(unittest.TestCase):
         result = self._run("//pkg:empty_test")
         self.assertFalse(result.ok)
         self.assertIn("contained no tests", result.message)
+
+    def test_a_fixture_from_the_repo_root_conftest_is_loaded(self):
+        # Found by slingshot: pytest ran from the package directory took
+        # it as rootdir and never loaded the root conftest.py -- while
+        # lirk still fingerprinted that file. Silent, because a test that
+        # merely *benefits* from a conftest (a guard, an autouse fixture)
+        # passes without it.
+        #
+        # Run from a temporary copy: inside this checkout, pytest 8 takes
+        # lirk's own pyproject.toml as a rootdir marker, which loads the
+        # conftest by accident and hides the bug.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name) / "repo"
+        shutil.copytree(self.ROOT, root)
+        graph = build_graph(root)
+        label = "//pkg:root_conftest_test"
+        result = run_test(graph.targets[label], root, _import_env(graph, root, label))
+        self.assertTrue(result.ok, result.stdout + result.stderr)
 
     def test_no_pytest_cache_is_written_into_the_package(self):
         self._run("//pkg:pass_test")

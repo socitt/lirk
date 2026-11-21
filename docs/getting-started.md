@@ -492,7 +492,7 @@ reporting a false green about itself.
 
 ## Command reference
 
-The entire CLI is two subcommands:
+The CLI's subcommands:
 
 | Command | Effect |
 |---|---|
@@ -638,8 +638,11 @@ imported file belongs to no target at all, so there is no label to add
 to `deps`. Declare the file in some target's `srcs` and depend on that
 target. Most often this is an `__init__.py` nobody listed.
 
-**`FAIL ...: fixture.txt: syntax error: invalid syntax`.** A
-non-Python file is in `srcs`. Move it to `data`.
+**`lirk: <file> (target #1): src 'fixture.txt' is not a .py file`.**
+A non-Python file is in `srcs`. Every src is parsed as Python, so this
+is rejected as soon as the BUILD file is read. Move it to `data`. (A
+file that is *named* `.py` but isn't Python fails later, at build time,
+as "not readable as Python source".)
 
 **`FAIL ...: 1 of 2 src files failed: test_empty -- contained no
 tests: test_empty`.** A src in a `test` target defined no tests. That's

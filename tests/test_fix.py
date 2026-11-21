@@ -205,7 +205,8 @@ class FixCommandTests(unittest.TestCase):
         before = self.build.read_text()
         code, out = self._run(["fix", "--dry-run"])
         self.assertEqual(self.build.read_text(), before)
-        self.assertIn("would add //base:base", out)
+        self.assertIn("would fix //leaf:undeclared: would add //base:base", out)
+        self.assertNotIn("  fixed ", out)
         self.assertIn("dry run", out)
 
     def test_scope_limits_what_is_edited(self):

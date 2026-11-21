@@ -9,9 +9,9 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-11-21): 239 tests, `python3 -m
+Last verified against source (2026-11-21): 266 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
-`lirk build //...` (15 targets) and `lirk test //...` (6 test targets)
+`lirk build //...` (17 targets) and `lirk test //...` (7 test targets)
 — which runs alongside the unittest invocation rather than replacing
 it. Both must be green.
 
@@ -360,6 +360,28 @@ The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
    concurrent runs become a real workflow.
 
 ## Recently closed
+
+- **slingshot milestone-1 findings** (2026-11-21). The fourth real repo,
+  built with lirk from its first commit, reported in its
+  `docs/lirk-notes.md`. Every item was reproduced here before fixing:
+  - **Root `conftest.py` silently not loaded (bug).** pytest, run from
+    the package directory, took that directory as rootdir and skipped
+    the repo-root conftest that lirk fingerprints. slingshot's
+    unseeded-randomness guard was inactive while its tests passed. Now
+    `--rootdir` and `--confcutdir` are pinned to the repo root. The
+    regression test runs from a temp copy, because inside this checkout
+    lirk's own `pyproject.toml` made pytest load the conftest by
+    accident and hid the bug. `ACTION_VERSION` 11 → 12.
+  - **`lirk build` redid library checks `lirk test` had just done.**
+    Cache keys now name the action (`build:` = validates, `test:` =
+    tests ran), so validations are shared between commands. A built
+    test target still never counts as tested.
+  - **Messages:** `fix --dry-run` says `would fix`; `verify` labels
+    lines `(build)` / `(tests)` and names the targets it couldn't check.
+    (`deps` placement was already fixed by `init`'s work.)
+  - **Stale docs:** the "two subcommands" line, the contradiction about
+    non-`.py` files in `srcs` (the real error is a parse-time rejection),
+    and three different gitignore lists, now one.
 
 - **Version set to 1.0.0** (2026-11-21). The criteria never fixed a
   number; 1.0.0 is the plain reading of "v1". The git tag waits for the

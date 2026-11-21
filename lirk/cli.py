@@ -46,6 +46,8 @@ SLOWEST_REPORT_THRESHOLD = 10.0
 SLOWEST_REPORT_COUNT = 3
 # Validation is normally instant; only a slow one is worth a duration.
 SLOW_BUILD_SECONDS = 1.0
+# How many uncached targets `lirk verify` names before summarising.
+VERIFY_UNCACHED_SHOWN = 5
 RECURSIVE_SUFFIX = "/..."
 PACKAGE_WILDCARD = "all"
 
@@ -184,10 +186,10 @@ def _execute(
 ) -> tuple[bool, ExecutionSummary]:
     """Validate (and, in 'test' mode, run) each target in `order`.
 
-    `mode` ('build' or 'test') namespaces the cache: `lirk build`
-    merely validating a test target's files must not count as
-    `lirk test` having actually run and passed it, so the two modes
-    never share a cache entry for the same target.
+    `mode` ('build' or 'test') decides whether test targets are run or
+    only validated. Cache keys follow the action: `build:<label>` for a
+    validation (shared by both commands), `test:<label>` only for a
+    test target whose tests actually ran.
 
     `force`, if set, skips the cache check so every target is
     re-validated/re-run regardless of its fingerprint, without
@@ -254,8 +256,14 @@ def _execute(
 
     for label in order:
         target = graph.targets[label]
-        cache_key = f"{mode}:{label}"
         is_test = mode == "test" and target.type == "test"
+        # The key names the *action*, not the command: validating a target
+        # is the same work whichever command asks for it, so `lirk build`
+        # after `lirk test` reuses the library checks instead of redoing
+        # them. Only actually running a test target's tests gets a test:
+        # entry -- `lirk build` merely validating a test target must never
+        # count as its tests having passed.
+        cache_key = f"test:{label}" if is_test else f"build:{label}"
 
         if label in failed:
             # A preflight missing-file failure, already reported above.
@@ -482,19 +490,19 @@ def cmd_verify(
     cache_path = root / CACHE_FILENAME
     cache = load_cache(cache_path)
 
-    # Each (mode, label) whose entry is valid right now. Both modes cache
-    # every target they process (a library validated during `lirk test`
-    # is stored as test:<label>), so each entry is its own claim, checked
-    # by re-doing what that mode did for that target.
+    # Each (kind, label) whose entry is valid right now: build:<label>
+    # claims the target validates, test:<label> (test targets only)
+    # claims its tests pass. Each is checked by re-doing that action.
     claims = [
-        (mode, label)
+        (kind, label)
         for label in subset_order
         if label in fingerprints
-        for mode in ("build", "test")
-        if not needs_build(f"{mode}:{label}", fingerprints[label], cache)
+        for kind in ("build", "test")
+        if (kind == "build" or graph.targets[label].type == "test")
+        and not needs_build(f"{kind}:{label}", fingerprints[label], cache)
     ]
     claimed = {label for _, label in claims}
-    not_cached = sum(1 for l in subset_order if l not in claimed)
+    uncached = [l for l in subset_order if l not in claimed]
 
     if sample is not None and sample < len(claims):
         import random  # only paid for when sampling is asked for
@@ -508,21 +516,22 @@ def cmd_verify(
     owners = owner_index(graph.targets, root)
     stale: list[str] = []
     verified = 0
-    for mode, label in claims:
+    for kind, label in claims:
         target = graph.targets[label]
         env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}))
-        if mode == "test" and target.type == "test":
+        what = "tests" if kind == "test" else "build"
+        if kind == "test":
             result = run_test(target, root, env)
         else:
             result = validate_target(target, root, env)
         if result.ok:
             verified += 1
-            print(f"  verified {label} ({mode})", flush=True)
+            print(f"  verified {label} ({what})", flush=True)
             continue
-        stale.append(f"{label} ({mode})")
-        cache.pop(f"{mode}:{label}", None)
+        stale.append(f"{label} ({what})")
+        cache.pop(f"{kind}:{label}", None)
         save_cache(cache_path, cache)
-        print(f"  STALE  {label} ({mode}): cached as passing, fails when re-run: "
+        print(f"  STALE  {label} ({what}): cached as passing, fails when re-run: "
               f"{result.message}", flush=True)
         for stream in (result.stdout, result.stderr):
             if stream.strip():
@@ -539,8 +548,16 @@ def cmd_verify(
         )
     print(
         f"lirk: {verified} verified, {len(stale)} stale, "
-        f"{not_cached} target(s) not cached"
+        f"{len(uncached)} target(s) not cached"
     )
+    if uncached:
+        # Named, not just counted: "1 target(s) not cached" left the
+        # reader to work out which one. Capped so //... on a large,
+        # cold repo doesn't scroll the summary away.
+        shown = ", ".join(uncached[:VERIFY_UNCACHED_SHOWN])
+        more = len(uncached) - VERIFY_UNCACHED_SHOWN
+        print(f"lirk: not cached (nothing to verify): {shown}"
+              + (f", and {more} more" if more > 0 else ""))
     print("lirk: OK" if not stale else "lirk: FAILED")
     return 1 if stale else 0
 
@@ -564,8 +581,9 @@ def cmd_fix(root: Path, labels: list[str], dry_run: bool = False) -> int:
     applied = apply_plan(root, graph, plan, write=not dry_run)
 
     verb = "would add" if dry_run else "added"
+    tag = "would fix" if dry_run else "fixed "
     for label, deps in applied.additions.items():
-        print(f"  fixed  {label}: {verb} {', '.join(deps)}", flush=True)
+        print(f"  {tag} {label}: {verb} {', '.join(deps)}", flush=True)
     for label, reason in applied.manual:
         print(f"  MANUAL {label}: {reason}", flush=True)
 

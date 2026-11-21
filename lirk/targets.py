@@ -96,9 +96,10 @@ def pytest_inputs(target: Target, root: Path) -> list[Path]:
     target.
 
     Bounded at the repo root because lirk's fingerprint and import check
-    are scoped there. pytest itself can read a conftest above it only
-    if its rootdir lands above the repo, i.e. an ini file further up --
-    a setup this does not model.
+    are scoped there -- and run_test pins pytest's --rootdir and
+    --confcutdir to the same root, so the conftests pytest loads are
+    exactly the ones collected here. (An ini file *above* the repo can
+    still be read by pytest's config search; that is not modelled.)
     """
     if target.runner != "pytest":
         return []

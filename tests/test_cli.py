@@ -5,8 +5,10 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
+from lirk import cli as cli_module
 from lirk.cli import (
     ExecutionSummary,
     _discover_root,
@@ -847,21 +849,38 @@ class VerifyCommandTests(unittest.TestCase):
         _run(["test", "//..."], self.root)
         code, out = _run(["verify"], self.root)
         self.assertEqual(code, 0, out)
-        # `lirk test //...` caches all six targets under test: keys --
-        # the three tests it ran and the three libraries it validated.
+        # `lirk test //...` caches three library checks (build:) and
+        # three test runs (test:).
         self.assertEqual(len(self._lines(out, "  verified ")), 6)
-        self.assertIn("//a:a_test (test)", out)
-        self.assertIn("//c:c_lib (test)", out)
+        self.assertIn("verified //a:a_test (tests)", out)
+        self.assertIn("verified //c:c_lib (build)", out)
         self.assertIn("6 verified, 0 stale, 0 target(s) not cached", out)
+        self.assertNotIn("not cached (nothing to verify)", out)
 
-    def test_build_and_test_entries_are_separate_claims(self):
-        _run(["build", "//c:c_lib"], self.root)
+    def test_a_test_targets_build_and_test_entries_are_separate_claims(self):
+        _run(["build", "//c:c_test"], self.root)
         _run(["test", "//c:c_test"], self.root)
-        _, out = _run(["verify", "//c:c_lib"], self.root)
+        _, out = _run(["verify", "//c:c_test"], self.root)
         self.assertEqual(
             self._lines(out, "  verified "),
-            ["  verified //c:c_lib (build)", "  verified //c:c_lib (test)"],
+            ["  verified //c:c_test (build)", "  verified //c:c_test (tests)"],
         )
+
+    def test_uncached_targets_are_named(self):
+        _run(["test", "//c:c_test"], self.root)
+        _, out = _run(["verify"], self.root)
+        self.assertIn(
+            "lirk: not cached (nothing to verify): "
+            "//b:b_lib, //a:a_lib, //a:a_test, //b:b_test\n",
+            out,
+        )
+
+    def test_a_long_uncached_list_is_capped(self):
+        with patch.object(cli_module, "VERIFY_UNCACHED_SHOWN", 2):
+            _, out = _run(["verify"], self.root)
+        self.assertIn("not cached (nothing to verify): //c:c_lib, //b:b_lib, and 4 more", out)
+
+
 
     def test_a_single_label_fingerprints_its_closure(self):
         # Verifying one target still needs its deps' fingerprints; only
@@ -869,7 +888,7 @@ class VerifyCommandTests(unittest.TestCase):
         _run(["test", "//..."], self.root)
         code, out = _run(["verify", "//a:a_test"], self.root)
         self.assertEqual(code, 0, out)
-        self.assertEqual(self._lines(out, "  verified "), ["  verified //a:a_test (test)"])
+        self.assertEqual(self._lines(out, "  verified "), ["  verified //a:a_test (tests)"])
 
     def test_sample_reruns_a_reproducible_subset(self):
         _run(["test", "//..."], self.root)
@@ -911,7 +930,7 @@ class VerifyCommandTests(unittest.TestCase):
 
         code, out = _run(["verify", "//story:story_test"], self.root)
         self.assertEqual(code, 1)
-        self.assertIn("STALE  //story:story_test (test)", out)
+        self.assertIn("STALE  //story:story_test (tests)", out)
         self.assertIn("not declared", out)
         self.assertIn("0 verified, 1 stale", out)
 
@@ -980,6 +999,39 @@ class TimingTests(unittest.TestCase):
     def test_slowest_is_silent_for_a_single_test(self):
         # One test's duration is already on its own line.
         self.assertEqual(self._slowest([("//a:t", 99.0)]), "")
+
+
+class SharedValidationCacheTests(unittest.TestCase):
+    """A validation is cached once, whichever command performed it."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def test_build_after_test_reuses_the_library_checks(self):
+        # Found by slingshot: `lirk build` re-validated every library that
+        # `lirk test` had just validated from the same files.
+        _run(["test", "//..."], self.root)
+        _, out = _run(["build", "//..."], self.root)
+        for lib in ("//a:a_lib", "//b:b_lib", "//c:c_lib"):
+            self.assertIn(f"cached  {lib}", out)
+        # Test targets were only *run* by `lirk test`; validating them is
+        # a separate, cheap claim that build still makes once.
+        self.assertIn("built  //a:a_test", out)
+
+    def test_test_after_build_reuses_library_checks_but_still_runs_tests(self):
+        _run(["build", "//..."], self.root)
+        _, out = _run(["test", "//..."], self.root)
+        self.assertIn("cached  //c:c_lib", out)
+        self.assertRegex(out, r"  PASS   //c:c_test ")
+
+    def test_building_a_test_target_never_counts_as_its_tests_passing(self):
+        _run(["build", "//c:c_test"], self.root)
+        cache = json.loads((self.root / ".lirk-cache.json").read_text())
+        self.assertIn("build://c:c_test", cache)
+        self.assertNotIn("test://c:c_test", cache)
 
 
 if __name__ == "__main__":

@@ -381,10 +381,15 @@ one.
 fingerprint. Local, gitignored state — not committed, not shared
 between machines.
 
-**Key is `"<mode>:<label>"`**, e.g. `build://a:lib` vs `test://a:lib`.
-Build and test never share an entry for the same target: `lirk build`
-merely validating a test target's files must not count as `lirk test`
-having actually run it. This guards a bug that really shipped.
+**Keys name the action, not the command.** `build:<label>` records that
+a target validates; `test:<label>` records that a test target's tests
+ran and passed. Validation is the same work whichever command performs
+it, so `lirk build` after `lirk test` reuses every library check instead
+of redoing it — keys used to be per-command, and the slingshot repo
+found the duplicated work. The split that matters is kept: `lirk build`
+merely validating a test target must never count as its tests having
+passed, a bug that really shipped once, so only an actual test run
+writes `test:`.
 
 **Fingerprint** (`compute_fingerprints`) is a SHA-256 over, in order:
 
@@ -420,11 +425,10 @@ Consequences worth stating explicitly:
   forever. This fired silently twice before the constant existed —
   once when `ast.parse` validation was added, once when the test
   subprocess environment changed. **Bump it in the same commit as any
-  change to `validate_target` or `run_test` behavior.** Currently `11`
-  — the last bump accompanied the per-target `timeout`, the anchored
-  zero-tests check, and multi-owner srcs in the import check. None of
-  those make a previously-cached pass wrong, but the rule is "any
-  behavior change", and the cost of honouring it is one full rerun.
+  change to `validate_target` or `run_test` behavior.** Currently `12`
+  — the last bump pinned pytest's `--rootdir`/`--confcutdir`. That one
+  *does* make earlier passes untrustworthy: a pytest target cached
+  before it ran without its repo-root conftest.
 - **The Python environment is an input.** `environment_fingerprint()`
   hashes the interpreter (implementation and full version) and the
   sorted names of every `*.dist-info`/`*.egg-info` directory in the
@@ -469,9 +473,9 @@ through any rework.
 deleting or truncating the cache file.
 
 **`lirk verify` audits the cache instead of trusting it.** Every
-`mode:label` entry that is valid right now is a claim — "a fresh run
-would pass" — and verify re-does what that mode did for that target
-(run the tests, or validate) and compares. A failure is a stale green:
+valid `build:` entry claims the target validates and every valid
+`test:` entry claims its tests pass; verify re-does that action and
+compares, labelling each line `(build)` or `(tests)`. A failure is a stale green:
 some input the fingerprint does not cover, in lirk or in the BUILD files
 (most often a file read at runtime but not declared in `data`). It is
 printed as `STALE`, the entry is deleted so the next ordinary run tells
@@ -553,8 +557,15 @@ subprocess.run(
   can echo an inner run's `Ran 0 tests` before its own summary.
 
 **`runner = "pytest"`** swaps the argv for `[sys.executable, "-m",
-"pytest", "-p", "no:cacheprovider", src]` and changes nothing else about
-the call: same `cwd`, `env`, `stdin`, `timeout`, one call per src. It
+"pytest", "-p", "no:cacheprovider", "--rootdir=<root>",
+"--confcutdir=<root>", src]` and changes nothing else about the call:
+same `cwd`, `env`, `stdin`, `timeout`, one call per src. The two pins
+matter: run from the package directory, pytest otherwise takes that
+directory as its rootdir and **silently skips the repo-root
+`conftest.py`** that lirk fingerprints. The slingshot repo found this
+when a seeding guard in its root conftest was inactive under lirk while
+the tests still passed. `--confcutdir` also stops pytest loading a
+conftest from above the repo. It
 exists because most Python repos use pytest, which made unittest-only
 the largest single adoption barrier. Three decisions came with it:
 
@@ -579,9 +590,9 @@ the largest single adoption barrier. Three decisions came with it:
   keeps pytest from writing `.pytest_cache` into the source tree as a
   side effect of a run.
 
-Not modelled: a pytest rootdir *above* the repo root (an ini file
-further up the filesystem), which could pull in a conftest from outside
-the repo.
+Not modelled: a pytest *ini file* above the repo root, which pytest's
+config search can still find. Conftests above the repo can no longer
+load, because of `--confcutdir`.
 
 **Test output is passed through raw**, unsummarized and unreformatted.
 Two independent assessments identified this as a practical strength.
