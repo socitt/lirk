@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Iterable, Mapping, Sequence, Set
@@ -26,6 +27,33 @@ from lirk.targets import Target
 # partially-cleaned-up timeout is accepted as strictly better than an
 # unbounded hang.
 TEST_TIMEOUT_SECONDS = 600
+
+# unittest's closing summary line, e.g. "Ran 3 tests in 0.004s". Anchored
+# to a line start, and only the *last* occurrence is consulted: a test
+# that itself drives unittest (lirk's own suite does) can echo an inner
+# run's summary into its stderr before its own.
+_RAN_LINE = re.compile(r"^Ran (\d+) tests? in ", re.MULTILINE)
+
+
+def _ran_zero_tests(stderr: str) -> bool:
+    matches = _RAN_LINE.findall(stderr)
+    return bool(matches) and matches[-1] == "0"
+
+
+def _as_text(captured: str | bytes | None) -> str:
+    """Partial output from a TimeoutExpired, as str.
+
+    subprocess.run raises TimeoutExpired carrying the *raw bytes* read so
+    far, even when called with text=True -- the decode only happens on
+    the normal return path. Joining that with the str output of other
+    srcs raised TypeError, so a timed-out test that had printed anything
+    crashed lirk instead of being reported.
+    """
+    if captured is None:
+        return ""
+    if isinstance(captured, bytes):
+        return captured.decode("utf-8", errors="replace")
+    return captured
 
 
 @dataclass
@@ -46,12 +74,12 @@ class ImportEnv:
     per-target, and only the CLI has both.
 
     - `owners`: resolved absolute path of every declared src -> the
-      label of the target declaring it.
+      labels of every target declaring it (usually exactly one).
     - `allowed`: the labels this target may import from -- its whole
       transitive dep closure, including itself.
     """
 
-    owners: Mapping[Path, str]
+    owners: Mapping[Path, frozenset[str]]
     allowed: Set[str]
 
 
@@ -74,19 +102,25 @@ def missing_files(target: Target, root: Path) -> list[str]:
     return missing
 
 
-def owner_index(targets: Mapping[str, Target], root: Path) -> dict[Path, str]:
-    """Resolved path of every declared src -> the label declaring it.
+def owner_index(
+    targets: Mapping[str, Target], root: Path
+) -> dict[Path, frozenset[str]]:
+    """Resolved path of every declared src -> the labels declaring it.
 
-    Built once per run and shared by every target's ImportEnv. If two
-    targets declare the same src the later one in graph order wins; that
-    is a repo-configuration oddity this index isn't the place to
-    diagnose, and either answer names a real declaring target.
+    Built once per run and shared by every target's ImportEnv. A src
+    declared by more than one target maps to all of them, and an import
+    of it is allowed if *any* declaring target is in the importer's
+    closure: each of them fingerprints the file, so any one in the
+    closure is enough to make an edit invalidate the importer. Keeping
+    only one owner (as this once did) made the verdict depend on which
+    declaration happened to be indexed last -- a correct `deps` entry on
+    the other declaring target was reported as an undeclared import.
     """
-    return {
-        (root / target.package / src).resolve(): label
-        for label, target in targets.items()
-        for src in target.srcs
-    }
+    index: dict[Path, set[str]] = {}
+    for label, target in targets.items():
+        for src in target.srcs:
+            index.setdefault((root / target.package / src).resolve(), set()).add(label)
+    return {path: frozenset(labels) for path, labels in index.items()}
 
 
 def _imported_modules(tree: ast.AST, src_path: Path) -> list[tuple[str, Path | None]]:
@@ -201,19 +235,22 @@ def undeclared_imports(
             found = found.resolve()
             if not found.is_relative_to(root_resolved):
                 continue
-            owner = env.owners.get(found)
-            if owner is not None and owner in env.allowed:
+            owners = env.owners.get(found, frozenset())
+            if owners & env.allowed:
                 continue
             if (src, dotted) in seen:
                 continue
             seen.add((src, dotted))
-            if owner is None:
+            if not owners:
                 rel = found.relative_to(root_resolved).as_posix()
                 problems.append(
                     f"{src} imports '{dotted}' -- no target declares {rel}"
                 )
             else:
-                problems.append(f"{src} imports '{dotted}' ({owner}), not in deps")
+                problems.append(
+                    f"{src} imports '{dotted}' ({', '.join(sorted(owners))}), "
+                    "not in deps"
+                )
 
     return problems
 
@@ -274,7 +311,11 @@ def validate_target(
 
 
 def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> ActionResult:
-    """Run a test target's source files via `python3 -m unittest`."""
+    """Run a test target's source files via `python3 -m unittest`.
+
+    Each src gets the target's own `timeout` if it declares one, else
+    TEST_TIMEOUT_SECONDS. Read at call time rather than bound as a
+    default argument, so a patched module constant is honoured."""
     validation = validate_target(target, root, env)
     if not validation.ok:
         return validation
@@ -292,10 +333,12 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
     timed_out: list[str] = []
     ran_nothing: list[str] = []
 
-    env = os.environ.copy()
+    timeout = target.timeout if target.timeout is not None else TEST_TIMEOUT_SECONDS
+
+    child_env = os.environ.copy()
     root_str = str(root.resolve())
-    existing_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
+    existing_pythonpath = child_env.get("PYTHONPATH")
+    child_env["PYTHONPATH"] = (
         f"{root_str}{os.pathsep}{existing_pythonpath}"
         if existing_pythonpath
         else root_str
@@ -316,9 +359,9 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
                 cwd=pkg_dir,
                 capture_output=True,
                 text=True,
-                env=env,
+                env=child_env,
                 stdin=subprocess.DEVNULL,
-                timeout=TEST_TIMEOUT_SECONDS,
+                timeout=timeout,
             )
         except subprocess.TimeoutExpired as e:
             # Recorded and carried on, not returned: bailing out here
@@ -326,8 +369,8 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
             # asymmetry accumulating failures was meant to remove. A
             # hung test often does mean the whole target is wedged, but
             # that is a guess, and guessing costs the other results.
-            stdout_parts.append(e.stdout or "")
-            stderr_parts.append(e.stderr or "")
+            stdout_parts.append(_as_text(e.stdout))
+            stderr_parts.append(_as_text(e.stderr))
             failed_modules.append(module)
             timed_out.append(module)
             continue
@@ -343,7 +386,7 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
         # fallback for a zero one, so the reason is named on 3.12 too,
         # where the exit code already catches it but explains nothing.
         # It can only ever add to the failure, never excuse one.
-        ran_no_tests = "Ran 0 tests" in proc.stderr
+        ran_no_tests = _ran_zero_tests(proc.stderr)
         if proc.returncode != 0 or ran_no_tests:
             failed_modules.append(module)
         if ran_no_tests:
@@ -356,7 +399,7 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
         )
         if timed_out:
             detail += (
-                f" -- timed out after {TEST_TIMEOUT_SECONDS}s: "
+                f" -- timed out after {timeout}s: "
                 f"{', '.join(timed_out)}"
             )
         if ran_nothing:

@@ -4,12 +4,14 @@ import unittest
 from pathlib import Path
 
 from lirk.graph import (
+    Graph,
     GraphError,
     build_graph,
     resolve_label,
     topological_sort,
     transitive_closure,
 )
+from lirk.targets import Target
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -139,6 +141,37 @@ class TopologicalSortTests(unittest.TestCase):
         self.assertLess(order.index("//pkg:a_lib"), order.index("//pkg:c_lib"))
         self.assertLess(order.index("//pkg:b_lib"), order.index("//pkg:d_lib"))
         self.assertLess(order.index("//pkg:c_lib"), order.index("//pkg:d_lib"))
+
+
+class DeepChainTests(unittest.TestCase):
+    """The sort is iterative: a chain longer than Python's recursion
+    limit used to escape as a RecursionError traceback."""
+
+    DEPTH = 3000
+
+    def _graph(self, close_cycle=False):
+        targets, edges = {}, {}
+        for i in range(self.DEPTH):
+            label = f"//p:t{i:05d}"
+            targets[label] = Target(f"t{i:05d}", "library", (), (), (), "p")
+            # t0 -> t1 -> ... so the first label visited is the top of
+            # the chain and the walk must go the whole depth.
+            nxt = i + 1 if i + 1 < self.DEPTH else (0 if close_cycle else None)
+            edges[label] = (f"//p:t{nxt:05d}",) if nxt is not None else ()
+        return Graph(targets=targets, edges=edges)
+
+    def test_long_chain_sorts_dependencies_first(self):
+        order = topological_sort(self._graph())
+        self.assertEqual(len(order), self.DEPTH)
+        self.assertEqual(order[0], f"//p:t{self.DEPTH - 1:05d}")
+        self.assertEqual(order[-1], "//p:t00000")
+
+    def test_long_cycle_is_still_named_in_full(self):
+        with self.assertRaises(GraphError) as caught:
+            topological_sort(self._graph(close_cycle=True))
+        message = str(caught.exception)
+        self.assertIn("circular dependency", message)
+        self.assertEqual(message.count("->"), self.DEPTH)
 
 
 class TransitiveClosureTests(unittest.TestCase):

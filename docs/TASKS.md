@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-08-04): 143 tests, `python3 -m
+Last verified against source (2026-11-21): 176 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
 `lirk build //...` (13 targets) and `lirk test //...` (5 test targets)
 — which runs alongside the unittest invocation rather than replacing
@@ -245,6 +245,54 @@ Both remaining items need input from outside the repo. Everything that
 could be done from inside it is done.
 
 ## Recently closed
+
+- **Codebase review pass** (2026-11-21). Two crashes found by probing
+  edges the suite didn't reach, three smaller correctness fixes, and
+  three features chosen because they serve the existing `library`/`test`
+  scope without touching the process model or reopening a settled
+  decision (§6 of DESIGN.md is unchanged). Suite 143 → 176; self-hosted
+  build/test green. `ACTION_VERSION` 10 → 11.
+
+  *Bugs:*
+  - **A timed-out test that had printed anything crashed lirk.**
+    `subprocess.run` raises `TimeoutExpired` carrying *bytes* even with
+    `text=True`; `run_test` joined them with `str` output and died with
+    `TypeError`. The existing hang fixture printed nothing, which is
+    why it never showed. Now decoded; fixture
+    `hang_repo/test_noisy_hang.py` prints before hanging, and the test
+    was confirmed to crash against the old source.
+  - **A deep dependency chain crashed the topological sort** with
+    `RecursionError` past ~1000 levels. Now an iterative DFS producing
+    the identical order and the same full-path cycle message; tested at
+    depth 3000.
+  - **A src declared by two targets made the import check
+    order-dependent.** `owner_index` kept whichever declaration was
+    indexed last, so depending on the *other* declaring target reported
+    a false "not in deps". It now records every declaring target and
+    accepts any one in the closure.
+  - **The zero-tests check matched `Ran 0 tests` anywhere in stderr**,
+    including an inner run echoed by a test that drives unittest itself
+    (which lirk's own suite does). Now only the last line-anchored
+    `Ran N tests in` summary counts.
+  - **Repeated `srcs`/`deps`/`data` entries are rejected at parse
+    time.** A repeated test src ran twice.
+
+  *Improvements and features:*
+  - **The BUILD.lirk scan prunes** dot-prefixed and `ignore`d
+    directories instead of `rglob`-ing into `.git`/`.venv` and
+    filtering afterwards — on iSH-AOK the dominant cost of the scan.
+  - **Label patterns and multiple labels on the command line:**
+    `//pkg:all`, `//pkg/...`, and any number of labels per invocation.
+    Previously `//...` was the only wildcard, and malformed labels on
+    the command line reported as "unknown target"; they now say
+    *malformed* or *must be absolute*, as `deps` labels already did.
+  - **Per-target `timeout`** on `test` targets (positive integer
+    seconds, part of the fingerprint). A wedged test no longer has to
+    cost the full 600s.
+  - **`lirk clean`** deletes the cache and any stray temp files, so a
+    full reset no longer means remembering the filename.
+  - `run_test`'s child environment no longer shadows its `env`
+    (`ImportEnv`) parameter.
 
 - **M4 — the root is named, and the cwd fallback announces itself**
   (2026-08-04). `main` prints a stderr note when no `.lirk-root` is

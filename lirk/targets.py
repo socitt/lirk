@@ -13,7 +13,7 @@ from pathlib import Path
 BUILD_FILENAME = "BUILD.lirk"
 ROOT_MARKER = ".lirk-root"
 VALID_TYPES = {"library", "test"}
-KNOWN_KEYS = {"name", "type", "srcs", "deps", "data"}
+KNOWN_KEYS = {"name", "type", "srcs", "deps", "data", "timeout"}
 ROOT_CONFIG_KEYS = {"ignore"}
 
 
@@ -68,6 +68,9 @@ class Target:
     deps: tuple[str, ...]
     data: tuple[str, ...]
     package: str  # e.g. "path/to/pkg"; "" for a package at repo root
+    # Per-src test timeout in seconds; None means the global default
+    # (actions.TEST_TIMEOUT_SECONDS). Only valid on `test` targets.
+    timeout: int | None = None
 
     @property
     def label(self) -> str:
@@ -146,6 +149,31 @@ def _parse_target(raw: dict, path: Path, package: str, index: int) -> Target:
     if type_ == "test" and not srcs:
         raise ConfigError(f"{where}: a 'test' target must declare at least one src")
 
+    # A repeated src would be fingerprinted twice (harmless) but *run*
+    # twice as a test (not harmless: double the time, and a stateful
+    # test can disagree with itself). Almost certainly a copy-paste slip.
+    for field_name, values in (("srcs", srcs), ("deps", deps), ("data", data)):
+        dupes = sorted({v for v in values if values.count(v) > 1})
+        if dupes:
+            raise ConfigError(
+                f"{where}: duplicate {field_name} entr{'y' if len(dupes) == 1 else 'ies'}: "
+                f"{', '.join(dupes)}"
+            )
+
+    timeout = raw.get("timeout")
+    if timeout is not None:
+        # bool is an int subclass in Python, and `timeout = true` must
+        # not quietly mean one second.
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+            raise ConfigError(
+                f"{where}: 'timeout' must be a positive integer number of seconds"
+            )
+        if type_ != "test":
+            raise ConfigError(
+                f"{where}: 'timeout' only applies to 'test' targets -- a "
+                f"{type_!r} target runs nothing"
+            )
+
     return Target(
         name=name,
         type=type_,
@@ -153,6 +181,7 @@ def _parse_target(raw: dict, path: Path, package: str, index: int) -> Target:
         deps=tuple(deps),
         data=tuple(data),
         package=package,
+        timeout=timeout,
     )
 
 

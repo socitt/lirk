@@ -7,3 +7,11 @@ srcs = ["test_hang.py"]
 name = "hang_then_more_test"
 type = "test"
 srcs = ["test_hang.py", "test_after.py"]
+
+# Declares its own timeout, so the test exercising it needs no patching,
+# and prints before hanging (see test_noisy_hang.py for why that matters).
+[[target]]
+name = "noisy_hang_test"
+type = "test"
+srcs = ["test_noisy_hang.py"]
+timeout = 1

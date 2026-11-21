@@ -274,5 +274,53 @@ class LoadIgnoresTests(unittest.TestCase):
                     load_ignores(self.root)
 
 
+class TimeoutAndDuplicateTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.path = Path(self._tmpdir.name) / "BUILD.lirk"
+
+    def _parse(self, body: str):
+        self.path.write_text("[[target]]\n" + body)
+        return parse_build_file(self.path, package="pkg")
+
+    def test_timeout_defaults_to_none(self):
+        (t,) = self._parse('name = "t"\ntype = "test"\nsrcs = ["test_t.py"]\n')
+        self.assertIsNone(t.timeout)
+
+    def test_timeout_is_parsed_on_a_test_target(self):
+        (t,) = self._parse(
+            'name = "t"\ntype = "test"\nsrcs = ["test_t.py"]\ntimeout = 30\n'
+        )
+        self.assertEqual(t.timeout, 30)
+
+    def test_invalid_timeouts_are_rejected(self):
+        for value in ("0", "-5", '"30"', "1.5", "true"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ConfigError, "positive integer"):
+                    self._parse(
+                        'name = "t"\ntype = "test"\nsrcs = ["test_t.py"]\n'
+                        f"timeout = {value}\n"
+                    )
+
+    def test_timeout_on_a_library_is_rejected(self):
+        with self.assertRaisesRegex(ConfigError, "only applies to 'test'"):
+            self._parse('name = "l"\ntype = "library"\nsrcs = ["l.py"]\ntimeout = 5\n')
+
+    def test_duplicate_srcs_are_rejected(self):
+        with self.assertRaisesRegex(ConfigError, "duplicate srcs entry: test_t.py"):
+            self._parse(
+                'name = "t"\ntype = "test"\nsrcs = ["test_t.py", "test_t.py"]\n'
+            )
+
+    def test_duplicate_deps_are_rejected(self):
+        with self.assertRaisesRegex(ConfigError, "duplicate deps entry: :x"):
+            self._parse('name = "l"\ntype = "library"\ndeps = [":x", ":x"]\n')
+
+    def test_duplicate_data_are_rejected(self):
+        with self.assertRaisesRegex(ConfigError, "duplicate data entry"):
+            self._parse('name = "l"\ntype = "library"\ndata = ["f", "f"]\n')
+
+
 if __name__ == "__main__":
     unittest.main()

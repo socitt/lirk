@@ -676,5 +676,149 @@ class VersionFlagTests(unittest.TestCase):
         self.assertNotEqual(caught.exception.code, 0)
 
 
+class LabelPatternTests(unittest.TestCase):
+    """`//pkg/...`, `//pkg:all` and several labels per invocation."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name)
+        (self.root / ".lirk-root").write_text("")
+        layout = {
+            "": '[[target]]\nname = "rootlib"\ntype = "library"\nsrcs = ["rootlib.py"]\n',
+            "pkg": (
+                '[[target]]\nname = "top"\ntype = "library"\nsrcs = ["top.py"]\n\n'
+                '[[target]]\nname = "top_test"\ntype = "test"\nsrcs = ["test_top.py"]\n'
+                'deps = [":top"]\n'
+            ),
+            "pkg/sub": '[[target]]\nname = "inner"\ntype = "library"\nsrcs = ["inner.py"]\n',
+            # Shares a string prefix with "pkg"; //pkg/... must not reach it.
+            "pkgx": '[[target]]\nname = "other"\ntype = "library"\nsrcs = ["other.py"]\n',
+        }
+        for package, build in layout.items():
+            d = self.root / package
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "BUILD.lirk").write_text(build)
+        for rel in ("rootlib.py", "pkg/top.py", "pkg/sub/inner.py", "pkgx/other.py"):
+            (self.root / rel).write_text("X = 1\n")
+        (self.root / "pkg" / "test_top.py").write_text(
+            "import unittest\n\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_ok(self):\n"
+            "        self.assertTrue(True)\n"
+        )
+
+    def _built(self, out):
+        return {
+            line.split()[1]
+            for line in out.splitlines()
+            if line.startswith("  built ") or line.startswith("  PASS ")
+        }
+
+    def test_recursive_pattern_covers_package_and_subpackages_only(self):
+        code, out = _run(["build", "//pkg/..."], self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            self._built(out), {"//pkg:top", "//pkg:top_test", "//pkg/sub:inner"}
+        )
+
+    def test_package_wildcard_covers_one_package_only(self):
+        code, out = _run(["build", "//pkg:all"], self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(self._built(out), {"//pkg:top", "//pkg:top_test"})
+
+    def test_root_package_wildcard(self):
+        code, out = _run(["build", "//:all"], self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(self._built(out), {"//:rootlib"})
+
+    def test_several_labels_are_unioned(self):
+        code, out = _run(["build", "//pkgx:other", "//pkg/sub:inner", "//pkgx:other"], self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(self._built(out), {"//pkgx:other", "//pkg/sub:inner"})
+        self.assertIn("2 built", out)
+
+    def test_a_real_target_named_all_wins_over_the_wildcard(self):
+        (self.root / "pkgx" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "all"\ntype = "library"\nsrcs = ["other.py"]\n\n'
+            '[[target]]\nname = "other"\ntype = "library"\nsrcs = ["other.py"]\n'
+        )
+        code, out = _run(["build", "//pkgx:all"], self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(self._built(out), {"//pkgx:all"})
+
+    def test_pattern_matching_nothing_fails(self):
+        for pattern in ("//nope/...", "//nope:all"):
+            with self.subTest(pattern=pattern):
+                code, out, err = _run_both(["build", pattern], root=self.root)
+                self.assertEqual(code, 1)
+                self.assertIn("matches no targets", err)
+
+    def test_malformed_and_relative_labels_are_rejected_clearly(self):
+        cases = {
+            "pkg:top": "must be absolute",
+            ":top": "must be absolute",
+            "//pkg": "malformed label",
+            "//pkg:": "malformed label",
+        }
+        for label, expected in cases.items():
+            with self.subTest(label=label):
+                code, out, err = _run_both(["build", label], root=self.root)
+                self.assertEqual(code, 1)
+                self.assertIn(expected, err)
+                self.assertIn("repo root is", err)
+
+    def test_test_pattern_runs_only_the_test_targets_it_covers(self):
+        code, out = _run(["test", "//pkg/..."], self.root)
+        self.assertEqual(code, 0)
+        self.assertIn("PASS   //pkg:top_test", out)
+        self.assertIn("1/1 tests passed", out)
+
+    def test_test_pattern_with_no_tests_is_not_a_failure(self):
+        code, out = _run(["test", "//pkg/sub/..."], self.root)
+        self.assertEqual(code, 0)
+        self.assertIn("no test targets found", out)
+
+    def test_explicit_non_test_label_is_still_an_error_alongside_patterns(self):
+        code, out, err = _run_both(["test", "//pkg/...", "//pkg:top"], root=self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("not 'test'", err)
+
+
+class CleanCommandTests(unittest.TestCase):
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def test_clean_removes_the_cache_so_the_next_run_rebuilds(self):
+        _run(["build", "//..."], self.root)
+        self.assertTrue((self.root / ".lirk-cache.json").exists())
+        stray = self.root / ".lirk-cache.json.12345.tmp"
+        stray.write_text("{}")
+
+        code, out = _run(["clean"], self.root)
+
+        self.assertEqual(code, 0)
+        self.assertFalse((self.root / ".lirk-cache.json").exists())
+        self.assertFalse(stray.exists())
+        self.assertIn("removed", out)
+
+        _, out = _run(["build", "//..."], self.root)
+        self.assertIn("6 built, 0 cached", out)
+
+    def test_clean_without_a_cache_is_a_quiet_success(self):
+        code, out = _run(["clean"], self.root)
+        self.assertEqual(code, 0)
+        self.assertIn("no cache to remove", out)
+
+    def test_clean_touches_nothing_else(self):
+        before = sorted(p.relative_to(self.root) for p in self.root.rglob("*"))
+        _run(["clean"], self.root)
+        after = sorted(p.relative_to(self.root) for p in self.root.rglob("*"))
+        self.assertEqual(before, after)
+
+
 if __name__ == "__main__":
     unittest.main()

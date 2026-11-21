@@ -87,10 +87,32 @@ deps = [":mylib"]
   fixture tree containing Python would accumulate `.pyc` files as a
   side effect of running the very tests whose fingerprint it feeds,
   and nothing would ever stay cached.
+- **`timeout`** — `test` targets only, optional. A positive integer
+  number of seconds each src of this target may run before it is
+  killed and reported as timed out. Defaults to lirk's global 600s.
+  Worth setting on anything that could hang: a wedged test otherwise
+  costs ten minutes before lirk moves on. Part of the fingerprint, so
+  changing it re-runs the target — a pass under a generous budget says
+  nothing about a tight one. Rejected on a `library` (which runs
+  nothing) and for zero, negative, fractional, string or boolean
+  values.
 
-Unknown keys in a `[[target]]` table are rejected, and a `test`
-target with no `srcs` is rejected — both fail at parse time rather
-than silently doing nothing.
+  ```toml
+  [[target]]
+  name = "game_test"
+  type = "test"
+  srcs = ["test_game.py"]
+  timeout = 30
+  ```
+
+Unknown keys in a `[[target]]` table are rejected, a `test` target with
+no `srcs` is rejected, and a repeated entry within `srcs`, `deps` or
+`data` is rejected (a repeated test src would otherwise run twice) —
+all fail at parse time rather than silently doing the wrong thing.
+
+A src may be declared by more than one target. An import of it is then
+satisfied by depending on *any* of the declaring targets, since each of
+them fingerprints the file.
 
 Filename is `BUILD.lirk` rather than `BUILD.toml` to keep it visually
 distinctive when grepping/`ls`-ing a package directory, mirroring the

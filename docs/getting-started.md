@@ -439,15 +439,16 @@ The entire CLI is two subcommands:
 
 | Command | Effect |
 |---|---|
-| `lirk build <label>` | Check every declared file exists, every src parses as Python, and every cross-package import is declared in `deps`, for the target and its transitive deps. |
-| `lirk test <label>` | Run each test src via `python3 -m unittest`, after building its deps. |
+| `lirk build <label>...` | Check every declared file exists, every src parses as Python, and every cross-package import is declared in `deps`, for the targets and their transitive deps. |
+| `lirk test <label>...` | Run each test src via `python3 -m unittest`, after building its deps. |
+| `lirk clean` | Delete `.lirk-cache.json` (and any temp file an interrupted run left beside it). The next run redoes everything. |
 
 | Flag | Applies to | Effect |
 |---|---|---|
 | `--force` | both | Ignore cached results and re-do everything in scope. Doesn't delete the cache file. |
 | `--rebuild` | `build` | Alias for `--force`. |
 | `--rerun` | `test` | Alias for `--force`. |
-| `--root <path>` | both | Use this repo root, overriding `.lirk-root` discovery entirely. |
+| `--root <path>` | all three | Use this repo root, overriding `.lirk-root` discovery entirely. |
 | `--version` | neither | Print the installed version and exit. Takes no subcommand. |
 
 Labels:
@@ -457,10 +458,16 @@ Labels:
 | `//pkg:name` | One target in package `pkg`. |
 | `//:name` | A target in the root package. |
 | `:name` | A sibling target — **valid inside `deps` only**, not on the command line. |
+| `//pkg:all` | Every target in package `pkg` (`//:all` for the root package). A target actually named `all` takes precedence. |
+| `//pkg/...` | Every target in `pkg` and in every package beneath it. `//app/...` does not reach `//apps`. |
 | `//...` | Every target in the repo. |
 
-`//...` is the only wildcard. `//app/...` is *not* supported and
-reports `unknown target: //app/...`.
+Several labels can be given at once — `lirk test //app/... //lib:lib_test`
+runs the union. Under `lirk test`, a wildcard quietly narrows to the
+`test` targets it covers (and finding none is not an error), while an
+explicitly named non-test target is still an error. A wildcard that
+matches no targets at all fails with `pattern //nope/... matches no
+targets`, since that is nearly always a typo.
 
 ## Reading the output
 
@@ -519,9 +526,14 @@ what `//` means for this run. If the named directory is your repo root,
 create an empty `.lirk-root` there and the note goes away. If it isn't,
 every `//` label in this run meant the wrong thing.
 
-**`lirk: unknown target: //app`.** A label needs both parts —
-`//package:name`. `//app` names no target. The same message appears for
-`//app/...`, which isn't supported wildcard syntax.
+**`lirk: malformed label '//app'`.** A label needs both parts —
+`//package:name`. You probably meant `//app:app`, `//app:all` (every
+target in the package) or `//app/...` (that package and everything
+beneath it).
+
+**`lirk: invalid label ':app': command-line labels must be absolute`.**
+`:name` works inside `deps` only. On the command line, spell out
+`//package:name`.
 
 **`lirk: circular dependency: //app:app -> //greeting:greeting ->
 //app:app`.** The full cycle path is in the message; break any edge in
@@ -570,7 +582,11 @@ test` needs a `test` target. Use `lirk build` for a library, or
 
 **A test hangs.** Test subprocesses get `stdin` connected to
 `/dev/null`, so a test reading stdin fails fast rather than silently
-eating your keystrokes. There's also a 600-second per-src timeout.
+eating your keystrokes. There's also a per-src timeout: 600 seconds by
+default, or set `timeout = <seconds>` on the `test` target to fail a
+wedged test much sooner. Only the direct child is killed — a process
+the test itself spawned can outlive it (lirk deliberately creates no
+process groups).
 
 ## If you're trialling lirk
 

@@ -69,8 +69,9 @@ touch .lirk-root
 lirk build //path/to/pkg:mytarget
 lirk test  //path/to/pkg:mytarget_test
 
-# whole repo
-lirk build //...
+# a package, a subtree, or the whole repo
+lirk build //path/to/pkg:all
+lirk test  //path/...
 lirk test  //...
 ```
 
