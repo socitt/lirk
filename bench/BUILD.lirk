@@ -1,0 +1,7 @@
+# The scale benchmark (see README.md). A library so lirk's own tests can
+# exercise the generator; `run.py` is a script, run directly.
+
+[[target]]
+name = "bench"
+type = "library"
+srcs = ["generate.py", "run.py"]

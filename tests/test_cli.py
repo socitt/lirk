@@ -1034,5 +1034,58 @@ class SharedValidationCacheTests(unittest.TestCase):
         self.assertNotIn("test://c:c_test", cache)
 
 
+class CacheSaveTests(unittest.TestCase):
+    """Saves are batched for cheap validations, immediate for test runs,
+    and never lost to an interruption."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def _count_saves(self, argv):
+        real = cli_module.save_cache
+        calls = []
+        def counting(path, cache):
+            calls.append(dict(cache))
+            real(path, cache)
+        with patch.object(cli_module, "save_cache", counting), \
+             patch.object(cli_module, "CACHE_SAVE_INTERVAL", 1e9):
+            _run(argv, self.root)
+        return calls
+
+    def test_validations_are_saved_once_not_per_target(self):
+        # Six validations, a huge interval: only the closing save.
+        calls = self._count_saves(["build", "//..."])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls[0]), 6)
+
+    def test_each_test_pass_is_saved_immediately(self):
+        calls = self._count_saves(["test", "//..."])
+        # Three test passes saved as they happen, plus the closing save.
+        self.assertEqual(len(calls), 4)
+        # The first save happens at the first test pass, carrying the
+        # library validations batched before it.
+        first = calls[0]
+        self.assertEqual(sum(k.startswith("test:") for k in first), 1)
+        self.assertEqual(sum(k.startswith("build:") for k in first), 3)
+
+    def test_an_interruption_keeps_what_already_finished(self):
+        real = cli_module.validate_target
+        seen = []
+        def interrupt_third(target, root, env=None):
+            seen.append(target.label)
+            if len(seen) == 3:
+                raise KeyboardInterrupt
+            return real(target, root, env)
+        with patch.object(cli_module, "validate_target", interrupt_third), \
+             patch.object(cli_module, "CACHE_SAVE_INTERVAL", 1e9):
+            with self.assertRaises(KeyboardInterrupt):
+                _run(["build", "//..."], self.root)
+        cache = json.loads((self.root / ".lirk-cache.json").read_text())
+        self.assertEqual(sorted(cache), sorted(f"build:{l}" for l in seen[:2]))
+
+
 if __name__ == "__main__":
     unittest.main()

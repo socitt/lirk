@@ -51,6 +51,7 @@ def plan_fixes(root: Path, graph: Graph, scope: list[str]) -> FixPlan:
     topologically ordered list of labels). Writes nothing."""
     plan = FixPlan()
     owners = owner_index(graph.targets, root)
+    resolved: dict = {}  # import-resolution memo shared by this run (ImportEnv)
     # A working copy of the edges, extended as additions are planned, so
     # cycle checks see this run's earlier decisions.
     edges = {label: list(deps) for label, deps in graph.edges.items()}
@@ -62,7 +63,7 @@ def plan_fixes(root: Path, graph: Graph, scope: list[str]) -> FixPlan:
         if error is not None:
             plan.manual.append((label, f"cannot check imports: {error.message}"))
             continue
-        env = ImportEnv(owners=owners, allowed=transitive_closure(working, {label}))
+        env = ImportEnv(owners=owners, allowed=transitive_closure(working, {label}), resolved=resolved)
         chosen: list[str] = []
         for problem in import_problems(target, root, env, parsed):
             if not problem.owners:

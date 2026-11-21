@@ -9,9 +9,9 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-11-21): 266 tests, `python3 -m
+Last verified against source (2026-11-21): 272 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
-`lirk build //...` (17 targets) and `lirk test //...` (7 test targets)
+`lirk build //...` (19 targets) and `lirk test //...` (8 test targets)
 — which runs alongside the unittest invocation rather than replacing
 it. Both must be green.
 
@@ -359,6 +359,21 @@ The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
    concurrent runs become a real workflow.
 
 ## Recently closed
+
+- **Scale benchmark, and two hotspots fixed** (2026-11-21). `bench/`
+  generates repos of any size and shape (wide, deep, mesh) where every
+  declared dep is a real import, and times lirk on them (cold, cached,
+  one-file edit, test, verify, fix). Nothing scaled badly, but the
+  profile showed two avoidable costs. A cold 1,000-target build went
+  from 1.40s to 0.73s:
+  - **Repeated import lookups (half the build).** Now memoized per run,
+    per (module, base directory), and never across runs.
+  - **Rewriting the cache after every target (17%, O(n²)).** Test passes
+    are still saved immediately. Validations are batched to one save
+    per second, and a `finally` saves on the way out. Tests cover the
+    batching and that Ctrl-C keeps finished results.
+  No `ACTION_VERSION` bump: neither changes what a result means.
+  **Still to measure on iSH**, the environment lirk targets.
 
 - **Docs rewritten for users** (2026-11-21). The published site now
   leads with what lirk does and why to use it: Overview, Getting
