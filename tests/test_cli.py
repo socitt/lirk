@@ -1034,5 +1034,172 @@ class SharedValidationCacheTests(unittest.TestCase):
         self.assertNotIn("test://c:c_test", cache)
 
 
+class CacheSaveTests(unittest.TestCase):
+    """Saves are batched for cheap validations, immediate for test runs,
+    and never lost to an interruption."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def _count_saves(self, argv):
+        real = cli_module.save_cache
+        calls = []
+        def counting(path, cache):
+            calls.append(dict(cache))
+            real(path, cache)
+        with patch.object(cli_module, "save_cache", counting), \
+             patch.object(cli_module, "CACHE_SAVE_INTERVAL", 1e9):
+            _run(argv, self.root)
+        return calls
+
+    def test_validations_are_saved_once_not_per_target(self):
+        # Six validations, a huge interval: only the closing save.
+        calls = self._count_saves(["build", "//..."])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls[0]), 6)
+
+    def test_each_test_pass_is_saved_immediately(self):
+        calls = self._count_saves(["test", "//..."])
+        # Three test passes saved as they happen, plus the closing save.
+        self.assertEqual(len(calls), 4)
+        # The first save happens at the first test pass, carrying the
+        # library validations batched before it.
+        first = calls[0]
+        self.assertEqual(sum(k.startswith("test:") for k in first), 1)
+        self.assertEqual(sum(k.startswith("build:") for k in first), 3)
+
+    def test_an_interruption_keeps_what_already_finished(self):
+        real = cli_module.validate_target
+        seen = []
+        def interrupt_third(target, root, env=None):
+            seen.append(target.label)
+            if len(seen) == 3:
+                raise KeyboardInterrupt
+            return real(target, root, env)
+        with patch.object(cli_module, "validate_target", interrupt_third), \
+             patch.object(cli_module, "CACHE_SAVE_INTERVAL", 1e9):
+            with self.assertRaises(KeyboardInterrupt):
+                _run(["build", "//..."], self.root)
+        cache = json.loads((self.root / ".lirk-cache.json").read_text())
+        self.assertEqual(sorted(cache), sorted(f"build:{l}" for l in seen[:2]))
+
+
+class FailFastTests(unittest.TestCase):
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name)
+        (self.root / ".lirk-root").write_text("")
+        # Three independent packages; the first in order fails.
+        for name, body in (("a", "def broken(:\n"), ("b", "X = 1\n"), ("c", "X = 1\n")):
+            (self.root / name).mkdir()
+            (self.root / name / f"{name}.py").write_text(body)
+            (self.root / name / "BUILD.lirk").write_text(
+                f'[[target]]\nname = "{name}"\ntype = "library"\nsrcs = ["{name}.py"]\n'
+            )
+
+    def test_stops_after_the_first_failure(self):
+        code, out = _run(["build", "//...", "--fail-fast"], self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL   //a:a", out)
+        self.assertNotIn("//b:b", out.split("stopped")[0])
+        self.assertIn("stopped at the first failure (--fail-fast); 2 target(s) not run", out)
+        self.assertIn("0 built, 0 cached, 1 failed, 0 skipped, 2 not run", out)
+
+    def test_without_the_flag_everything_runs(self):
+        code, out = _run(["build", "//..."], self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("built  //b:b", out)
+        self.assertIn("built  //c:c", out)
+        self.assertNotIn("not run", out)
+
+    def test_a_clean_run_is_unaffected(self):
+        (self.root / "a" / "a.py").write_text("X = 1\n")
+        code, out = _run(["build", "//...", "--fail-fast"], self.root)
+        self.assertEqual(code, 0)
+        self.assertIn("3 built", out)
+
+    def test_not_run_tests_count_in_the_test_total(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        shutil.copytree(FIXTURES / "failing_test_repo", root, dirs_exist_ok=True)
+        _, out = _run(["test", "//...", "--fail-fast"], root)
+        self.assertRegex(out, r"lirk: 0/\d+ tests passed")
+
+
+class CachePruningTests(unittest.TestCase):
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def _cache(self):
+        return json.loads((self.root / ".lirk-cache.json").read_text())
+
+    def test_entries_for_deleted_targets_are_dropped(self):
+        _run(["test", "//..."], self.root)
+        self.assertIn("test://c:c_test", self._cache())
+        build = self.root / "c" / "BUILD.lirk"
+        build.write_text(build.read_text().split("[[target]]\nname = \"c_test\"")[0])
+        _run(["build", "//c:c_lib"], self.root)
+        self.assertNotIn("test://c:c_test", self._cache())
+
+    def test_entries_outside_the_selection_are_kept(self):
+        _run(["test", "//..."], self.root)
+        _run(["build", "//c:c_lib"], self.root)
+        self.assertIn("test://a:a_test", self._cache())
+
+
+class RootConfigTests(unittest.TestCase):
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def test_an_ignore_entry_matching_nothing_warns(self):
+        (self.root / ".lirk-root").write_text('ignore = ["tests/fixtrues"]\n')
+        code, out, err = _run_both(["build", "//..."], root=self.root)
+        self.assertEqual(code, 0)
+        self.assertIn(
+            "lirk: warning: .lirk-root: ignore entry 'tests/fixtrues' matches no directory",
+            err,
+        )
+
+    def test_an_ignore_entry_that_exists_is_quiet(self):
+        (self.root / "vendor").mkdir()
+        (self.root / ".lirk-root").write_text('ignore = ["vendor"]\n')
+        _, _, err = _run_both(["build", "//..."], root=self.root)
+        self.assertNotIn("warning", err)
+
+    def test_repo_timeout_applies_to_tests_without_their_own(self):
+        from lirk.graph import build_graph
+        (self.root / ".lirk-root").write_text("timeout = 42\n")
+        build = self.root / "c" / "BUILD.lirk"
+        build.write_text(build.read_text().replace(
+            'name = "c_test"', 'name = "c_test"\ntimeout = 7'))
+        graph = build_graph(self.root)
+        self.assertEqual(graph.targets["//a:a_test"].timeout, 42)
+        self.assertEqual(graph.targets["//c:c_test"].timeout, 7)  # own wins
+        self.assertIsNone(graph.targets["//a:a_lib"].timeout)     # libraries untouched
+
+    def test_changing_the_repo_timeout_reruns_tests(self):
+        _run(["test", "//..."], self.root)
+        (self.root / ".lirk-root").write_text("timeout = 42\n")
+        _, out = _run(["test", "//..."], self.root)
+        self.assertRegex(out, r"  PASS   //a:a_test ")
+        self.assertIn("cached  //a:a_lib", out)
+
+    def test_invalid_repo_timeout_is_rejected(self):
+        (self.root / ".lirk-root").write_text("timeout = 0\n")
+        code, _, err = _run_both(["build", "//..."], root=self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("'timeout' must be a positive integer", err)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -44,6 +44,7 @@ exactly as your test runner printed it.
 | Option | Effect |
 |---|---|
 | `--force` (or `--rerun`) | Ignore the cache and run everything selected. The cache is kept. |
+| `--fail-fast` | Stop at the first failure instead of running the rest. |
 
 ## `lirk build`
 
@@ -55,6 +56,7 @@ or a missing file.
 | Option | Effect |
 |---|---|
 | `--force` (or `--rebuild`) | Ignore the cache and recheck everything selected. |
+| `--fail-fast` | Stop at the first failure. |
 
 ## `lirk init`
 
@@ -95,6 +97,8 @@ depends on something it doesn't declare, usually a data file.
 ## `lirk clean`
 
 Deletes `.lirk-cache.json`, so the next run does everything again.
+(You rarely need it: entries for targets you delete are dropped
+automatically.)
 
 ## Reading the output
 

@@ -46,6 +46,9 @@ SLOWEST_REPORT_THRESHOLD = 10.0
 SLOWEST_REPORT_COUNT = 3
 # Validation is normally instant; only a slow one is worth a duration.
 SLOW_BUILD_SECONDS = 1.0
+# Longest gap between cache saves while only cheap validations finish;
+# see _execute. Test results are always saved at once.
+CACHE_SAVE_INTERVAL = 1.0
 # How many uncached targets `lirk verify` names before summarising.
 VERIFY_UNCACHED_SHOWN = 5
 RECURSIVE_SUFFIX = "/..."
@@ -151,6 +154,8 @@ def _load_graph(root: Path) -> tuple[Graph, list[str]] | None:
         # fault is that //orrery is no longer inside the repo.
         print(f"lirk: repo root is {root}", file=sys.stderr)
         return None
+    for warning in graph.warnings:
+        print(f"lirk: warning: {warning}", file=sys.stderr)
     return graph, order
 
 
@@ -164,6 +169,9 @@ class ExecutionSummary:
     tests_failed: int = 0
     tests_cached: int = 0
     tests_skipped: int = 0
+    # Targets never reached because --fail-fast stopped the run.
+    not_run: int = 0
+    tests_not_run: int = 0
     # Labels that actually FAILed, in the order reported. Skipped
     # dependents are deliberately not in here: they are consequences,
     # and listing them buries the labels worth acting on.
@@ -178,11 +186,17 @@ class ExecutionSummary:
             + self.tests_failed
             + self.tests_cached
             + self.tests_skipped
+            + self.tests_not_run
         )
 
 
 def _execute(
-    root: Path, graph: Graph, order: list[str], mode: str, force: bool = False
+    root: Path,
+    graph: Graph,
+    order: list[str],
+    mode: str,
+    force: bool = False,
+    fail_fast: bool = False,
 ) -> tuple[bool, ExecutionSummary]:
     """Validate (and, in 'test' mode, run) each target in `order`.
 
@@ -209,6 +223,7 @@ def _execute(
     # a package outside the requested subset, and that is exactly the
     # case worth catching.
     owners = owner_index(graph.targets, root)
+    resolved: dict = {}  # import-resolution memo shared by this run (ImportEnv)
 
     # Check every target's declared files exist before fingerprinting
     # anything: compute_fingerprints reads file contents unconditionally,
@@ -254,84 +269,117 @@ def _execute(
         summary.failed += 1
         return False, summary
 
-    for label in order:
-        target = graph.targets[label]
-        is_test = mode == "test" and target.type == "test"
-        # The key names the *action*, not the command: validating a target
-        # is the same work whichever command asks for it, so `lirk build`
-        # after `lirk test` reuses the library checks instead of redoing
-        # them. Only actually running a test target's tests gets a test:
-        # entry -- `lirk build` merely validating a test target must never
-        # count as its tests having passed.
-        cache_key = f"test:{label}" if is_test else f"build:{label}"
+    # Saves are batched for cheap work and immediate for expensive work.
+    # Rewriting the whole cache after every target cost O(n^2) writes --
+    # 17% of a cold 1,000-target build, and worse on a slow disk. Now a
+    # test run (expensive to redo) is saved at once, validations at most
+    # every CACHE_SAVE_INTERVAL seconds, and `finally` saves once more on
+    # the way out, Ctrl-C included. A hard crash can lose at
+    # most that interval of cheap validations, never a test result.
+    last_save = time.monotonic()
+    try:
+        for position, label in enumerate(order):
+            if fail_fast and summary.failures:
+                # Stop before starting anything new. Counted, not listed:
+                # the point of --fail-fast is a short screen.
+                rest = order[position:]
+                summary.not_run = len(rest)
+                summary.tests_not_run = sum(
+                    1 for l in rest
+                    if mode == "test" and graph.targets[l].type == "test"
+                )
+                print(
+                    f"lirk: stopped at the first failure (--fail-fast); "
+                    f"{len(rest)} target(s) not run",
+                    flush=True,
+                )
+                break
+            target = graph.targets[label]
+            is_test = mode == "test" and target.type == "test"
+            # The key names the *action*, not the command: validating a target
+            # is the same work whichever command asks for it, so `lirk build`
+            # after `lirk test` reuses the library checks instead of redoing
+            # them. Only actually running a test target's tests gets a test:
+            # entry -- `lirk build` merely validating a test target must never
+            # count as its tests having passed.
+            cache_key = f"test:{label}" if is_test else f"build:{label}"
 
-        if label in failed:
-            # A preflight missing-file failure, already reported above.
-            continue
+            if label in failed:
+                # A preflight missing-file failure, already reported above.
+                continue
 
-        dep_failure = next((d for d in graph.edges[label] if d in failed), None)
-        if dep_failure is not None:
-            ok = False
-            failed.add(label)
-            summary.skipped += 1
+            dep_failure = next((d for d in graph.edges[label] if d in failed), None)
+            if dep_failure is not None:
+                ok = False
+                failed.add(label)
+                summary.skipped += 1
+                if is_test:
+                    summary.tests_skipped += 1
+                print(f"  SKIP   {label}: dependency {dep_failure} failed", flush=True)
+                continue
+
+            fp = fingerprints[label]
+
+            if not force and not needs_build(cache_key, fp, cache):
+                print(f"  cached  {label}", flush=True)
+                summary.cached += 1
+                if is_test:
+                    summary.tests_cached += 1
+                continue
+
+            env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}), resolved=resolved)
+
+            started = time.monotonic()
             if is_test:
-                summary.tests_skipped += 1
-            print(f"  SKIP   {label}: dependency {dep_failure} failed", flush=True)
-            continue
-
-        fp = fingerprints[label]
-
-        if not force and not needs_build(cache_key, fp, cache):
-            print(f"  cached  {label}", flush=True)
-            summary.cached += 1
-            if is_test:
-                summary.tests_cached += 1
-            continue
-
-        env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}))
-
-        started = time.monotonic()
-        if is_test:
-            result = run_test(target, root, env)
-            verb = "PASS" if result.ok else "FAIL"
-        else:
-            result = validate_target(target, root, env)
-            verb = "built" if result.ok else "FAIL"
-        elapsed = time.monotonic() - started
-        # Wall-clock from a monotonic clock: iSH-AOK's CPU-time accounting
-        # is known to be unreliable (DESIGN.md §4), and wall time is what
-        # the person waiting actually experiences.
-        timing = ""
-        if is_test:
-            summary.test_durations.append((label, elapsed))
-            timing = f" ({_format_duration(elapsed)})"
-        elif elapsed >= SLOW_BUILD_SECONDS:
-            timing = f" ({_format_duration(elapsed)})"
-
-        if result.ok:
-            cache[cache_key] = fp
-            print(f"  {verb:6} {label}{timing}", flush=True)
-            if is_test:
-                summary.tests_passed += 1
+                result = run_test(target, root, env)
+                verb = "PASS" if result.ok else "FAIL"
             else:
-                summary.built += 1
-            # Saved after every successful target, not just at the end
-            # of the loop, so an interruption (Ctrl-C, SIGTERM, an
-            # iSH-AOK crash) never discards results already computed.
-            save_cache(cache_path, cache)
-        else:
-            ok = False
-            failed.add(label)
-            summary.failed += 1
-            summary.failures.append(label)
+                result = validate_target(target, root, env)
+                verb = "built" if result.ok else "FAIL"
+            elapsed = time.monotonic() - started
+            # Wall-clock from a monotonic clock: iSH-AOK's CPU-time accounting
+            # is known to be unreliable (DESIGN.md §4), and wall time is what
+            # the person waiting actually experiences.
+            timing = ""
             if is_test:
-                summary.tests_failed += 1
-            print(f"  {verb:6} {label}{timing}: {result.message}", flush=True)
-            for stream in (result.stdout, result.stderr):
-                if stream.strip():
-                    print(stream.rstrip(), flush=True)
+                summary.test_durations.append((label, elapsed))
+                timing = f" ({_format_duration(elapsed)})"
+            elif elapsed >= SLOW_BUILD_SECONDS:
+                timing = f" ({_format_duration(elapsed)})"
 
-    save_cache(cache_path, cache)
+            if result.ok:
+                cache[cache_key] = fp
+                print(f"  {verb:6} {label}{timing}", flush=True)
+                if is_test:
+                    summary.tests_passed += 1
+                else:
+                    summary.built += 1
+                now = time.monotonic()
+                if is_test or now - last_save >= CACHE_SAVE_INTERVAL:
+                    save_cache(cache_path, cache)
+                    last_save = now
+            else:
+                ok = False
+                failed.add(label)
+                summary.failed += 1
+                summary.failures.append(label)
+                if is_test:
+                    summary.tests_failed += 1
+                print(f"  {verb:6} {label}{timing}: {result.message}", flush=True)
+                for stream in (result.stdout, result.stderr):
+                    if stream.strip():
+                        print(stream.rstrip(), flush=True)
+    finally:
+        # Entries for targets that no longer exist anywhere in the repo
+        # (deleted or renamed) would otherwise accumulate forever. Only
+        # labels absent from the *whole* graph are dropped -- never ones
+        # merely outside this run's selection.
+        for key in [k for k in cache if k.partition(":")[2] not in graph.targets]:
+            del cache[key]
+        # Always, once: covers whatever the interval held back, an
+        # interruption mid-run, and a run where nothing passed (which
+        # still leaves a cache file, as it always has).
+        save_cache(cache_path, cache)
     return ok, summary
 
 
@@ -393,7 +441,9 @@ def _resolve_roots(
     return graph, order, roots
 
 
-def cmd_build(root: Path, labels: list[str], force: bool = False) -> int:
+def cmd_build(
+    root: Path, labels: list[str], force: bool = False, fail_fast: bool = False
+) -> int:
     resolved = _resolve_roots(root, labels, "build")
     if resolved is None:
         return 1
@@ -402,17 +452,22 @@ def cmd_build(root: Path, labels: list[str], force: bool = False) -> int:
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
 
-    ok, summary = _execute(root, graph, subset_order, mode="build", force=force)
+    ok, summary = _execute(
+        root, graph, subset_order, mode="build", force=force, fail_fast=fail_fast
+    )
     _print_failures(summary)
     print(
         f"lirk: {summary.built} built, {summary.cached} cached, "
         f"{summary.failed} failed, {summary.skipped} skipped"
+        + (f", {summary.not_run} not run" if summary.not_run else "")
     )
     print("lirk: OK" if ok else "lirk: FAILED")
     return 0 if ok else 1
 
 
-def cmd_test(root: Path, labels: list[str], force: bool = False) -> int:
+def cmd_test(
+    root: Path, labels: list[str], force: bool = False, fail_fast: bool = False
+) -> int:
     resolved = _resolve_roots(root, labels, "test")
     if resolved is None:
         return 1
@@ -429,7 +484,9 @@ def cmd_test(root: Path, labels: list[str], force: bool = False) -> int:
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
 
-    ok, summary = _execute(root, graph, subset_order, mode="test", force=force)
+    ok, summary = _execute(
+        root, graph, subset_order, mode="test", force=force, fail_fast=fail_fast
+    )
     _print_slowest(summary)
     _print_failures(summary)
     passed = summary.tests_passed + summary.tests_cached
@@ -514,11 +571,12 @@ def cmd_verify(
         claims = [c for i, c in enumerate(claims) if i in chosen]
 
     owners = owner_index(graph.targets, root)
+    resolved: dict = {}  # import-resolution memo shared by this run (ImportEnv)
     stale: list[str] = []
     verified = 0
     for kind, label in claims:
         target = graph.targets[label]
-        env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}))
+        env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}), resolved=resolved)
         what = "tests" if kind == "test" else "build"
         if kind == "test":
             result = run_test(target, root, env)
@@ -725,6 +783,10 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         "--force", "--rebuild", action="store_true", dest="force",
         help="bypass the cache and re-validate every target in scope",
     )
+    build_p.add_argument(
+        "--fail-fast", action="store_true",
+        help="stop at the first failure instead of checking everything",
+    )
     build_p.add_argument("--root", type=Path, default=None, help=root_help)
 
     test_p = sub.add_parser("test", help="run test targets")
@@ -732,6 +794,10 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     test_p.add_argument(
         "--force", "--rerun", action="store_true", dest="force",
         help="bypass the cache and re-run every test in scope",
+    )
+    test_p.add_argument(
+        "--fail-fast", action="store_true",
+        help="stop at the first failure instead of running everything",
     )
     test_p.add_argument("--root", type=Path, default=None, help=root_help)
 
@@ -798,7 +864,7 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
                 )
 
     if args.command == "build":
-        return cmd_build(root, args.labels, force=args.force)
+        return cmd_build(root, args.labels, force=args.force, fail_fast=args.fail_fast)
     if args.command == "clean":
         return cmd_clean(root)
     if args.command == "init":
@@ -809,7 +875,7 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         if args.sample is not None and args.sample < 1:
             parser.error("--sample must be at least 1")
         return cmd_verify(root, args.labels, sample=args.sample, seed=args.seed)
-    return cmd_test(root, args.labels, force=args.force)
+    return cmd_test(root, args.labels, force=args.force, fail_fast=args.fail_fast)
 
 
 if __name__ == "__main__":

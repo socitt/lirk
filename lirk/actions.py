@@ -14,7 +14,7 @@ import re
 import subprocess
 import sys
 from collections.abc import Iterable, Mapping, Sequence, Set
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from lirk.targets import Target, pytest_inputs
@@ -87,10 +87,22 @@ class ImportEnv:
       labels of every target declaring it (usually exactly one).
     - `allowed`: the labels this target may import from -- its whole
       transitive dep closure, including itself.
+    - `resolved`: a memo of import lookups, (dotted name, one base
+      directory) -> resolved file or None. Share one dict across every
+      target in a run: resolving an import means stat-ing candidate
+      files, and the same lookups recur target after target -- at 1,000
+      targets the repeated stats were half of a cold build. Keyed per
+      base directory, not per list of bases, so a lookup against the
+      repo root is answered once for the whole run rather than once per
+      package. Scoped to one run, never kept between runs, since files
+      can change between them.
     """
 
     owners: Mapping[Path, frozenset[str]]
     allowed: Set[str]
+    resolved: dict[tuple[str, Path], Path | None] = field(
+        default_factory=dict, compare=False
+    )
 
 
 def missing_files(target: Target, root: Path) -> list[str]:
@@ -272,11 +284,18 @@ def import_problems(
     for src, tree in parsed:
         src_path = (pkg_dir / src).resolve()
         for dotted, base in _imported_modules(tree, src_path):
-            bases = [base] if base is not None else [pkg_dir, root]
-            found = _resolve_module(dotted, bases)
+            bases = (base,) if base is not None else (pkg_dir, root)
+            found = None
+            for one in bases:
+                key = (dotted, one)
+                if key not in env.resolved:
+                    hit = _resolve_module(dotted, [one])
+                    env.resolved[key] = hit.resolve() if hit is not None else None
+                found = env.resolved[key]
+                if found is not None:
+                    break
             if found is None:
                 continue
-            found = found.resolve()
             if not found.is_relative_to(root_resolved):
                 continue
             owners = env.owners.get(found, frozenset())

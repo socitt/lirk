@@ -30,6 +30,10 @@ is your repo root, `touch .lirk-root` there and the note goes away.
 **`pattern //nope/... matches no targets`.** Usually a typo in the
 path.
 
+**`warning: .lirk-root: ignore entry 'tests/fixtrues' matches no
+directory`.** A typo in `.lirk-root`'s `ignore` list, so the directory
+you meant to skip is being scanned. Fix the path.
+
 **`//lib:lib is type 'library', not 'test'`.** `lirk test` runs test
 targets. Use `lirk build` for a library, or a pattern like `//lib/...`,
 which selects just the tests.
@@ -82,8 +86,9 @@ a renamed class or a lost import.
 directory (`greeting/greeting.py`). Rename the file.
 
 **`timed out after 600s`.** A test file ran past its time limit. Set a
-shorter `timeout` on the target so a hang fails sooner, and give any
-subprocesses your test starts their own timeouts.
+shorter `timeout` on the target (or a repo-wide one in `.lirk-root`)
+so a hang fails sooner, and give any subprocesses your test starts
+their own timeouts.
 
 **`pytest is not installed for /usr/bin/python3`.** Install pytest for
 that Python (`python3 -m pip install pytest`), the same one that runs

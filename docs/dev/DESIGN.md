@@ -332,6 +332,12 @@ Four decisions inside it, none of them free:
   repo — stdlib, site-packages — is not lirk's business. There is no
   `importlib` machinery and nothing is imported to find out; it is
   `ast` plus path existence.
+- **Lookups are memoized per run.** Resolving an import stats candidate
+  files, and the same lookups recur target after target. `ImportEnv`
+  carries a dict, shared by every target in one run, keyed by (module,
+  one base directory), so a lookup against the repo root is answered
+  once per run. It's never kept across runs, since files change between
+  them. At 1,000 targets, the repeated lookups were half of a cold build.
 - **The AST is reused, not re-parsed.** `validate_target` already
   parses every src for the syntax check, so the import walk rides on
   the same trees. A second parse would only be a second chance to
@@ -457,10 +463,15 @@ unlocked read-modify-write, so overlapping runs can still lose one
 run's entries — but a lost entry costs a redundant rebuild, whereas a
 torn temp file is a corrupt cache. Locking properly would mean a lock
 file, whose stale-after-crash failure mode is a poor trade on a device
-that crashes. `_execute` saves after *every* successful target, not
-once at the end — on a device that has crashed mid-session before,
-losing a completed 60s run to a Ctrl-C is the same category of problem
-the project's doc discipline exists to avoid. Every per-target `print`
+that crashes. `_execute` saves **every test pass immediately** — on a
+device that has crashed mid-session before, losing a completed 60s test
+run to a Ctrl-C is the same category of problem the project's doc
+discipline exists to avoid — but batches cheap validations to at most
+one save per `CACHE_SAVE_INTERVAL` (1s), and a `finally` saves once more
+on the way out, interruptions included. Saving after every target
+rewrote the whole file each time: O(n²), and 17% of a cold 1,000-target
+build in `bench/`. A hard crash can now lose at most a second of
+validations, never a test result. Every per-target `print`
 uses `flush=True` for the same reason: block-buffered stdout loses a
 redirected run's whole progress log on interruption.
 
@@ -683,6 +694,7 @@ Recorded so a later session doesn't relitigate them:
 | `lirk/scaffold.py` | `lirk init`: draft skeleton BUILD files (files and target types only); deps come from `fix` |
 | `lirk/fix.py` | `lirk fix`: plan `deps` additions from `import_problems`, edit BUILD files textually, verify by re-parse before writing |
 | `lirk/cli.py` | Arg parsing, label patterns, root discovery, `_execute` loop, summaries, `clean`, exit codes |
+| `bench/` | Scale benchmark: `generate.py` builds synthetic repos, `run.py` times lirk on them |
 | `bin/lirk` | Path-inserting shim for running from a checkout without installing |
 
 Tests are plain `unittest`, run with

@@ -69,3 +69,9 @@ name = "test_scaffold"
 type = "test"
 srcs = ["test_scaffold.py"]
 deps = [":init", "//lirk:cli", "//lirk:scaffold"]
+
+[[target]]
+name = "test_bench"
+type = "test"
+srcs = ["test_bench.py"]
+deps = [":init", "//bench:bench", "//lirk:cli"]
