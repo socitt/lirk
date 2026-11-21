@@ -1,0 +1,46 @@
+# Both test paths on every supported Python, as README's Contributing
+# section requires: `unittest discover` is the source of truth, and the
+# self-hosted run proves lirk on itself. `lirk verify` then re-runs every
+# cached result, so CI also checks the cache never claims a stale green.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.11", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # lirk itself has no dependencies. pytest is installed only so the
+      # pytest-runner tests run instead of skipping.
+      - name: Install pytest
+        run: python -m pip install pytest
+      - name: Unit tests (source of truth)
+        run: python -m unittest discover -s tests -t .
+      - name: Self-hosted build
+        run: python -m lirk build //...
+      - name: Self-hosted test
+        run: python -m lirk test //...
+      - name: Verify cached results against fresh runs
+        run: python -m lirk verify
+      - name: Package installs and runs
+        run: |
+          python -m pip install .
+          cd "$RUNNER_TEMP" && lirk --version
