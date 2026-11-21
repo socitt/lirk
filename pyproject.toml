@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lirk"
-version = "0.1.0"
+version = "1.0.0"
 description = "A minimal, Bazel/Please-inspired build tool for Python monorepos."
 readme = "README.md"
 license = { file = "LICENSE" }
