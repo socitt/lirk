@@ -1,3 +1,4 @@
+import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
@@ -517,6 +518,116 @@ class SharedSrcOwnershipTests(unittest.TestCase):
         result = self._validate_with_dep(None)
         self.assertFalse(result.ok)
         self.assertIn("//shared:one, //shared:two", result.message)
+
+
+HAVE_PYTEST = importlib.util.find_spec("pytest") is not None
+
+
+@unittest.skipUnless(HAVE_PYTEST, "pytest is not installed for this interpreter")
+class PytestRunnerTests(unittest.TestCase):
+    """`runner = "pytest"`: same process model, one call per src."""
+
+    ROOT = FIXTURES / "pytest_repo"
+
+    def setUp(self):
+        self.graph = build_graph(self.ROOT)
+
+    def _run(self, label):
+        return run_test(
+            self.graph.targets[label], self.ROOT, _import_env(self.graph, self.ROOT, label)
+        )
+
+    def test_passing_module_passes_using_a_conftest_fixture(self):
+        result = self._run("//pkg:pass_test")
+        self.assertTrue(result.ok, result.stdout + result.stderr)
+        self.assertIn("1 passed", result.stdout)
+
+    def test_failing_module_fails_with_raw_output(self):
+        result = self._run("//pkg:fail_test")
+        self.assertFalse(result.ok)
+        self.assertIn("1 of 1 src files failed", result.message)
+        self.assertIn("meant to fail", result.stdout)
+
+    def test_module_collecting_nothing_is_a_failure(self):
+        result = self._run("//pkg:empty_test")
+        self.assertFalse(result.ok)
+        self.assertIn("contained no tests", result.message)
+
+    def test_no_pytest_cache_is_written_into_the_package(self):
+        self._run("//pkg:pass_test")
+        self.assertFalse((self.ROOT / "pkg" / ".pytest_cache").exists())
+
+    def test_runs_with_the_process_model_unchanged(self):
+        # One direct subprocess.run per src: no shell, no new session.
+        with patch.object(actions.subprocess, "run", wraps=actions.subprocess.run) as spy:
+            self._run("//pkg:pass_test")
+        self.assertEqual(spy.call_count, 1)
+        args, kwargs = spy.call_args
+        self.assertEqual(args[0][1:3], ["-m", "pytest"])
+        self.assertNotIn("shell", kwargs)
+        self.assertNotIn("start_new_session", kwargs)
+        self.assertEqual(kwargs["stdin"], actions.subprocess.DEVNULL)
+
+
+class PytestConftestImportTests(unittest.TestCase):
+    """A conftest is imported by pytest before any test, so its imports
+    are held to the same closure rule as a src's."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name)
+        for pkg in ("lib", "tests"):
+            (self.root / pkg).mkdir()
+        (self.root / "lib" / "util.py").write_text("X = 1\n")
+        (self.root / "lib" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "util"\ntype = "library"\nsrcs = ["util.py"]\n'
+        )
+        (self.root / "tests" / "test_x.py").write_text("def test_x():\n    pass\n")
+        # The conftest sits at the repo root, two levels above nothing
+        # in particular -- it applies to every pytest target beneath it.
+        (self.root / "conftest.py").write_text("from lib import util\n")
+
+    def _validate(self, deps):
+        (self.root / "tests" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "t"\ntype = "test"\nrunner = "pytest"\n'
+            f'srcs = ["test_x.py"]\ndeps = {deps}\n'
+        )
+        graph = build_graph(self.root)
+        return validate_target(
+            graph.targets["//tests:t"], self.root, _import_env(graph, self.root, "//tests:t")
+        )
+
+    def test_undeclared_conftest_import_fails_naming_the_conftest(self):
+        result = self._validate("[]")
+        self.assertFalse(result.ok)
+        self.assertIn("../conftest.py imports 'lib.util' (//lib:util), not in deps", result.message)
+
+    def test_declaring_the_dep_satisfies_it(self):
+        self.assertTrue(self._validate('["//lib:util"]').ok)
+
+    def test_syntax_error_in_conftest_fails_the_build(self):
+        (self.root / "conftest.py").write_text("def broken(:\n")
+        result = self._validate('["//lib:util"]')
+        self.assertFalse(result.ok)
+        self.assertIn("conftest.py: syntax error", result.message)
+
+    def test_unittest_targets_ignore_conftest(self):
+        (self.root / "conftest.py").write_text("def broken(:\n")
+        (self.root / "tests" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "t"\ntype = "test"\nsrcs = ["test_x.py"]\n'
+        )
+        graph = build_graph(self.root)
+        result = validate_target(
+            graph.targets["//tests:t"], self.root, _import_env(graph, self.root, "//tests:t")
+        )
+        self.assertTrue(result.ok, result.message)
+
+
+class PytestMissingTests(unittest.TestCase):
+    def test_detects_the_interpreter_error(self):
+        self.assertTrue(actions._pytest_missing("/usr/bin/python3: No module named pytest\n"))
+        self.assertFalse(actions._pytest_missing("E   ModuleNotFoundError: No module named 'pytesty'\n"))
 
 
 if __name__ == "__main__":

@@ -2,7 +2,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lirk.targets import ROOT_MARKER, ConfigError, load_ignores, parse_build_file
+from lirk.targets import (
+    ROOT_MARKER,
+    ConfigError,
+    Target,
+    load_ignores,
+    parse_build_file,
+    pytest_inputs,
+)
 
 
 class ParseBuildFileTests(unittest.TestCase):
@@ -320,6 +327,68 @@ class TimeoutAndDuplicateTests(unittest.TestCase):
     def test_duplicate_data_are_rejected(self):
         with self.assertRaisesRegex(ConfigError, "duplicate data entry"):
             self._parse('name = "l"\ntype = "library"\ndata = ["f", "f"]\n')
+
+
+class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.path = Path(self._tmpdir.name) / "BUILD.lirk"
+
+    def _parse(self, body: str):
+        self.path.write_text("[[target]]\n" + body)
+        return parse_build_file(self.path, package="pkg")
+
+    def test_runner_defaults_to_unittest(self):
+        (t,) = self._parse('name = "t"\ntype = "test"\nsrcs = ["test_t.py"]\n')
+        self.assertEqual(t.runner, "unittest")
+
+    def test_pytest_runner_is_parsed(self):
+        (t,) = self._parse(
+            'name = "t"\ntype = "test"\nsrcs = ["test_t.py"]\nrunner = "pytest"\n'
+        )
+        self.assertEqual(t.runner, "pytest")
+
+    def test_unknown_runner_is_rejected(self):
+        with self.assertRaisesRegex(ConfigError, "'runner' must be one of"):
+            self._parse('name = "t"\ntype = "test"\nsrcs = ["test_t.py"]\nrunner = "nose"\n')
+
+    def test_runner_on_a_library_is_rejected(self):
+        with self.assertRaisesRegex(ConfigError, "'runner' only applies to 'test'"):
+            self._parse('name = "l"\ntype = "library"\nsrcs = ["l.py"]\nrunner = "pytest"\n')
+
+
+class PytestInputsTests(unittest.TestCase):
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        (self.root / "a" / "b").mkdir(parents=True)
+
+    def _target(self, runner="pytest", package="a/b"):
+        return Target("t", "test", ("test_t.py",), (), (), package, runner=runner)
+
+    def test_collects_config_files_from_package_up_to_root_nearest_first(self):
+        (self.root / "a" / "b" / "conftest.py").write_text("")
+        (self.root / "a" / "pytest.ini").write_text("")
+        (self.root / "conftest.py").write_text("")
+        (self.root / "pyproject.toml").write_text("")
+        found = [p.relative_to(self.root.resolve()).as_posix() for p in pytest_inputs(self._target(), self.root)]
+        self.assertEqual(found, ["a/b/conftest.py", "a/pytest.ini", "conftest.py", "pyproject.toml"])
+
+    def test_nothing_above_the_repo_root_is_collected(self):
+        (self.root.parent / "conftest.py").write_text("")
+        self.addCleanup((self.root.parent / "conftest.py").unlink)
+        self.assertEqual(pytest_inputs(self._target(), self.root), [])
+
+    def test_root_package_target(self):
+        (self.root / "conftest.py").write_text("")
+        found = pytest_inputs(self._target(package=""), self.root)
+        self.assertEqual([p.name for p in found], ["conftest.py"])
+
+    def test_unittest_targets_have_none(self):
+        (self.root / "conftest.py").write_text("")
+        self.assertEqual(pytest_inputs(self._target(runner="unittest"), self.root), [])
 
 
 if __name__ == "__main__":

@@ -105,6 +105,32 @@ deps = [":mylib"]
   timeout = 30
   ```
 
+- **`runner`** — `test` targets only, optional: `"unittest"` (the
+  default) or `"pytest"`. With `"pytest"`, each src is run as
+  `python3 -m pytest -p no:cacheprovider <src>`, still one direct
+  subprocess per src, with the output passed through raw. pytest must be
+  installed for the interpreter lirk runs under; if it isn't, the
+  failure says so. A src that collects no tests fails, as it does under
+  unittest.
+
+  pytest reads files that aren't srcs: every `conftest.py`,
+  `pytest.ini`, `pyproject.toml`, `tox.ini` and `setup.cfg` in the
+  package directory and each parent up to the repo root. A pytest target
+  folds all of them into its fingerprint automatically, so editing a
+  conftest or your pytest config re-runs the tests. Each `conftest.py`
+  is also syntax-checked, and its imports are held to the same `deps`
+  rule as a src's: a conftest importing a repo module needs that
+  module's target in `deps`.
+
+  ```toml
+  [[target]]
+  name = "api_test"
+  type = "test"
+  runner = "pytest"
+  srcs = ["test_api.py"]
+  deps = [":api"]
+  ```
+
 Unknown keys in a `[[target]]` table are rejected, a `test` target with
 no `srcs` is rejected, and a repeated entry within `srcs`, `deps` or
 `data` is rejected (a repeated test src would otherwise run twice) —

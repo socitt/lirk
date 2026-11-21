@@ -1,0 +1,23 @@
+[[target]]
+name = "greet"
+type = "library"
+srcs = ["greet.py"]
+
+[[target]]
+name = "pass_test"
+type = "test"
+runner = "pytest"
+srcs = ["test_pass.py"]
+deps = [":greet"]
+
+[[target]]
+name = "fail_test"
+type = "test"
+runner = "pytest"
+srcs = ["test_fail.py"]
+
+[[target]]
+name = "empty_test"
+type = "test"
+runner = "pytest"
+srcs = ["test_empty.py"]

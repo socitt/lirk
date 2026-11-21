@@ -17,7 +17,7 @@ from collections.abc import Iterable, Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
 
-from lirk.targets import Target
+from lirk.targets import Target, pytest_inputs
 
 # Chosen so it doesn't trip on the slowest known test target (~12s,
 # backgammon:main_test). subprocess.run's timeout only kills the
@@ -38,6 +38,16 @@ _RAN_LINE = re.compile(r"^Ran (\d+) tests? in ", re.MULTILINE)
 def _ran_zero_tests(stderr: str) -> bool:
     matches = _RAN_LINE.findall(stderr)
     return bool(matches) and matches[-1] == "0"
+
+
+def _pytest_missing(stderr: str) -> bool:
+    """`python -m pytest` failed because pytest isn't importable.
+
+    Worth naming: the raw "No module named pytest" is easy to misread as
+    the test's own import failing, and the fix (install pytest for the
+    interpreter lirk runs under) is nothing to do with the test.
+    """
+    return "No module named pytest" in stderr
 
 
 def _as_text(captured: str | bytes | None) -> str:
@@ -274,9 +284,22 @@ def validate_target(
             target.label, False, f"missing source file(s): {', '.join(missing)}"
         )
 
+    # A pytest target's conftest.py files are parsed and import-checked
+    # like srcs: pytest imports them before any test, and they are
+    # fingerprinted implicitly (cache.compute_fingerprints), so an import
+    # they make outside the closure is the same stale input as one a src
+    # makes. Named relative to the package ("../conftest.py") so the
+    # message points at the right file and undeclared_imports resolves
+    # it from the package directory like any src.
+    to_parse = [(src, pkg_dir / src) for src in target.srcs]
+    to_parse += [
+        (os.path.relpath(path, pkg_dir.resolve()).replace(os.sep, "/"), path)
+        for path in pytest_inputs(target, root)
+        if path.name == "conftest.py"
+    ]
+
     parsed: list[tuple[str, ast.AST]] = []
-    for src in target.srcs:
-        src_path = pkg_dir / src
+    for src, src_path in to_parse:
         try:
             # Decoded as UTF-8 explicitly, not via the locale encoding:
             # Python source is UTF-8 by default (PEP 3120), and a
@@ -311,7 +334,8 @@ def validate_target(
 
 
 def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> ActionResult:
-    """Run a test target's source files via `python3 -m unittest`.
+    """Run a test target's source files via `python3 -m unittest`, or
+    `python3 -m pytest` for a target declaring `runner = "pytest"`.
 
     Each src gets the target's own `timeout` if it declares one, else
     TEST_TIMEOUT_SECONDS. Read at call time rather than bound as a
@@ -332,6 +356,7 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
     failed_modules: list[str] = []
     timed_out: list[str] = []
     ran_nothing: list[str] = []
+    missing_runner: list[str] = []
 
     timeout = target.timeout if target.timeout is not None else TEST_TIMEOUT_SECONDS
 
@@ -353,9 +378,18 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
         # Using the stem alone also silently collided two srcs with the
         # same filename in different subdirectories onto one module.
         module = Path(src).with_suffix("").as_posix().replace("/", ".")
+        if target.runner == "pytest":
+            # pytest takes the file path rather than a dotted module.
+            # `-p no:cacheprovider` stops it writing .pytest_cache into
+            # the package: lirk keeps its own cache, and a tool that
+            # writes into the source tree as a side effect of a test run
+            # is how inputs start changing underneath their fingerprint.
+            argv = [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", src]
+        else:
+            argv = [sys.executable, "-m", "unittest", module]
         try:
             proc = subprocess.run(
-                [sys.executable, "-m", "unittest", module],
+                argv,
                 cwd=pkg_dir,
                 capture_output=True,
                 text=True,
@@ -386,7 +420,15 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
         # fallback for a zero one, so the reason is named on 3.12 too,
         # where the exit code already catches it but explains nothing.
         # It can only ever add to the failure, never excuse one.
-        ran_no_tests = _ran_zero_tests(proc.stderr)
+        if target.runner == "pytest":
+            # pytest's own, version-stable signal: exit 5 means nothing
+            # was collected. Unlike unittest on 3.11, it never exits 0
+            # for an empty module, so the exit code is enough.
+            ran_no_tests = proc.returncode == 5
+            if _pytest_missing(proc.stderr):
+                missing_runner.append(module)
+        else:
+            ran_no_tests = _ran_zero_tests(proc.stderr)
         if proc.returncode != 0 or ran_no_tests:
             failed_modules.append(module)
         if ran_no_tests:
@@ -404,6 +446,8 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
             )
         if ran_nothing:
             detail += f" -- contained no tests: {', '.join(ran_nothing)}"
+        if missing_runner:
+            detail += f" -- pytest is not installed for {sys.executable}"
         return ActionResult(
             target.label,
             False,
