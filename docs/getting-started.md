@@ -230,8 +230,45 @@ That's the whole workflow.
 
 ## Part 2 — adopting lirk in an existing repo
 
-Work through these in order; each is a place a real repo tends to
-stumble.
+### The fast path: `lirk init`
+
+From your repo's top level:
+
+```
+$ lirk init
+  created app/BUILD.lirk: library :app (1 srcs); test :app_test (1 srcs, unittest)
+  created lib/BUILD.lirk: library :lib (2 srcs)
+  deps   //app:app: //lib:lib
+  deps   //app:app_test: :app
+lirk: drafted 2 BUILD.lirk file(s), 3 target(s); 0 need a hand fix
+$ lirk test //...
+```
+
+`init` drafts one `library` per directory of Python files and one
+`test` target for its `test_*.py` / `*_test.py` files, choosing
+`runner = "pytest"` for plain-function test files. It then derives
+**every** dep from what the code actually imports, using the same
+planner as `lirk fix`. Nothing about the graph is guessed. It creates
+an empty `.lirk-root` if there isn't one, never touches a directory
+that already has a `BUILD.lirk` (so it's safe to re-run after adding a
+package), and skips virtualenvs, `build/`, `dist/`, dot-directories and
+anything in `.lirk-root`'s `ignore` list. `--dry-run` lists what it
+would create.
+
+What it can't know, and you should check:
+
+- **Files read at runtime** (fixtures, templates, golden output) need
+  declaring as `data`. Nothing imports them, so no tool can see them.
+  `lirk verify` catches the ones you miss.
+- **`MANUAL` lines**: an import of a file two targets would own, or
+  packages importing each other (a cycle). Both need a decision only you
+  can make.
+- **Target boundaries**: one library per directory is a starting point.
+  Split or merge targets freely afterwards.
+
+The sections below explain the model `init` follows. Read them before
+reshaping its output, or if you'd rather convert by hand. Each covers a
+place a real repo tends to stumble.
 
 ### Deciding what a package is
 
@@ -462,6 +499,7 @@ The entire CLI is two subcommands:
 | `lirk build <label>...` | Check every declared file exists, every src parses as Python, and every cross-package import is declared in `deps`, for the targets and their transitive deps. |
 | `lirk test <label>...` | Run each test src via `python3 -m unittest`, after building its deps. |
 | `lirk verify [label...]` | Re-run every currently-cached result in scope (default `//...`) with the cache bypassed, and fail on any that no longer passes. `--sample N` checks a random N instead; `--seed` reproduces a sample. A disagreement prints `STALE`, and that cache entry is deleted. |
+| `lirk init` | Draft a `BUILD.lirk` for every directory of Python files that has none, then add the deps their imports call for. Creates `.lirk-root` if missing. `--dry-run` lists the files without writing them. |
 | `lirk fix [label...]` | Add the `deps` entries the import check reports as missing (default scope `//...`), editing BUILD files in place with comments preserved. Anything ambiguous, or that would create a cycle, is listed as `MANUAL` instead. `--dry-run` shows the edits without making them. Exit 0 only when nothing needs a hand fix. |
 | `lirk clean` | Delete `.lirk-cache.json` (and any temp file an interrupted run left beside it). The next run redoes everything. |
 

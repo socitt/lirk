@@ -358,6 +358,15 @@ and unless it declares exactly the original targets with exactly the
 planned deps appended and nothing else disturbed, the file is left
 untouched and the change reported for a hand fix.
 
+**`lirk init` declares files and leaves edges to `fix`.** It drafts one
+`library` per directory of `.py` files, and a `test` target for
+`test_*.py` / `*_test.py`, with pytest chosen for plain-function test
+files. It writes no deps at all: the new targets go straight to `fix`'s
+planner. So the generated graph has exactly the edges the imports
+demand, and inherits every `fix` guarantee (no guessing, no cycles,
+verified writes). Directories that already have a BUILD file are never
+touched, which keeps `init` safe to re-run.
+
 `ImportEnv` (the owner index plus the target's allowed labels) is built
 by `cli.py` and passed in, so `actions.py` still doesn't import the
 graph layer. When it is absent, `validate_target` does the syntax check
@@ -660,6 +669,7 @@ Recorded so a later session doesn't relitigate them:
 | `lirk/graph.py` | Scan repo, resolve labels, build `Graph`, topological sort, transitive closure |
 | `lirk/cache.py` | `ACTION_VERSION`, fingerprints, atomic cache load/save, `needs_build` |
 | `lirk/actions.py` | `missing_files`, `validate_target`, `run_test`, the import check (`import_problems`) — the only place a subprocess is spawned |
+| `lirk/scaffold.py` | `lirk init`: draft skeleton BUILD files (files and target types only); deps come from `fix` |
 | `lirk/fix.py` | `lirk fix`: plan `deps` additions from `import_problems`, edit BUILD files textually, verify by re-parse before writing |
 | `lirk/cli.py` | Arg parsing, label patterns, root discovery, `_execute` loop, summaries, `clean`, exit codes |
 | `bin/lirk` | Path-inserting shim for running from a checkout without installing |

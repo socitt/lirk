@@ -162,10 +162,14 @@ def add_deps_to_text(text: str, target_name: str, new_deps: list[str]) -> str:
 
     deps_m = re.compile(r"^([ \t]*)deps[ \t]*=[ \t]*\[", re.MULTILINE).search(text, start, end)
     if deps_m is None:
-        # Added on the line after `name`, at the same indent. Key order
-        # within a TOML table carries no meaning.
-        indent = re.match(r"[ \t]*", name_match.group(0)).group(0)
-        line_end = name_match.end()
+        # Added after a one-line `srcs` (where a person would put it), or
+        # else after `name`, at the same indent. Key order within a TOML
+        # table carries no meaning, so this is purely for the reader.
+        anchor = re.compile(
+            r"^[ \t]*srcs[ \t]*=[ \t]*\[[^\n]*\][ \t]*(?:#.*)?$", re.MULTILINE
+        ).search(text, start, end) or name_match
+        indent = re.match(r"[ \t]*", anchor.group(0)).group(0)
+        line_end = anchor.end()
         return text[:line_end] + f"\n{indent}deps = [{', '.join(quoted)}]" + text[line_end:]
 
     open_idx = deps_m.end() - 1

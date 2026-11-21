@@ -63,3 +63,9 @@ type = "test"
 srcs = ["test_fix.py"]
 deps = [":init", "//lirk:cli", "//lirk:fix"]
 data = ["fixtures"]
+
+[[target]]
+name = "test_scaffold"
+type = "test"
+srcs = ["test_scaffold.py"]
+deps = [":init", "//lirk:cli", "//lirk:scaffold"]

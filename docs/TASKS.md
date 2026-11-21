@@ -230,7 +230,7 @@ does). Python-only, `library`/`test`-only stays the scope.
 | Milestone | Theme | Contents |
 |---|---|---|
 | **v1.0** | Tag it | Version decision, PyPI (F9), CI matrix (F1) |
-| **v1.x** | Trust and adoption | ~~Environment fingerprinting~~, ~~pytest runner~~, ~~`lirk verify`~~, ~~`lirk fix`~~ (all done), `lirk init` |
+| **v1.x** | Trust and adoption | ~~Environment fingerprinting~~, ~~pytest runner~~, ~~`lirk verify`~~, ~~`lirk fix` / `lirk init`~~ — **all done** |
 | **v1.y** | Speed without parallelism | `--changed`, per-target timings (F2), `--fail-fast` (F4), repo-wide timeout (F3) |
 | **v2** | Teams | JSON / JUnit-XML output, a GitHub Action; opt-in `-j` only with evidence |
 
@@ -248,7 +248,11 @@ does). Python-only, `library`/`test`-only stays the scope.
   fingerprinted, and conftest imports are checked against `deps`
   (DESIGN §5). Self-hosting doesn't exercise it, since lirk's own suite
   is unittest; the `pytest_repo` fixture and tests do.
-- [~] **R4 — `lirk fix` and `lirk init`.** *`fix` done 2026-11-21*:
+- [x] **R4 — `lirk fix` and `lirk init`.** *`init` done 2026-11-21*:
+  drafts skeleton BUILD files (files and target types only) and hands
+  the new targets to `fix`'s planner for every dep. From zero BUILD files,
+  the `sample_repo` fixture reaches 3/3 tests passing with no hand edits.
+  *`fix` done 2026-11-21*:
   adds every missing `deps` entry the import check can attribute to
   exactly one target, refuses edits that would create a cycle (counting
   the run's own earlier additions), drops additions another addition
@@ -288,7 +292,8 @@ direct `subprocess.run()` per src, serial, no process groups) and none
 of them reopens a settled decision in §6. Roughly in order of value
 for effort.
 
-- [ ] **F1 — CI on every supported Python.** No workflow exists, and
+- [x] **F1 — CI on every supported Python.** Done 2026-11-21:
+  `.github/workflows/ci.yml`. Original note: No workflow exists, and
   `pyproject.toml` promises 3.11+ while development happens on one
   version. A GitHub Actions matrix (3.11, 3.12, 3.13) running both
   `unittest discover` and `python3 -m lirk test //...` would catch a
@@ -347,8 +352,10 @@ The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
    (PR #1, 2026-11-21); the tag push itself was left to the author.
    `pyproject.toml` already says `1.0.0` (decided 2026-11-21: the plain
    reading of "v1"). The tag goes on `main`, not on a feature branch.
-2. **Roadmap v1.x** — `lirk init` (the rest of R4) is what remains.
-   R1, R2, R3 and `lirk fix` are done.
+2. **Roadmap v1.x is complete** (R1–R4). Next is evidence rather than
+   features: the `slingshot` project, built with lirk from its first
+   commit, is the fourth real repo. Its `docs/lirk-notes.md` will drive
+   what comes next. F9 (PyPI) is the remaining adoption step.
 3. **L7**, only if a real repo hits it. **L3**'s remaining half only if
    concurrent runs become a real workflow.
 

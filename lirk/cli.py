@@ -1,6 +1,7 @@
 """The `lirk` command line: `build` and `test` over one or more target
 labels or patterns, `verify` to audit cached results, `fix` to add
-missing deps, and `clean`. Output is kept compact -- this runs in
+missing deps, `init` to draft BUILD files for an existing repo, and
+`clean`. Output is kept compact -- this runs in
 a narrow phone terminal.
 
 Label forms accepted on the command line:
@@ -36,7 +37,7 @@ from lirk.cache import (
     save_cache,
 )
 from lirk.graph import Graph, GraphError, build_graph, topological_sort, transitive_closure
-from lirk.targets import ROOT_MARKER, ConfigError
+from lirk.targets import BUILD_FILENAME, ROOT_MARKER, ConfigError
 
 ALL_TARGETS = "//..."
 # A run whose tests took at least this long in total ends by naming its
@@ -578,6 +579,61 @@ def cmd_fix(root: Path, labels: list[str], dry_run: bool = False) -> int:
     return 1 if applied.manual else 0
 
 
+def cmd_init(root: Path, dry_run: bool = False) -> int:
+    """Draft BUILD.lirk files for every package without one, then let
+    `fix`'s planner add the deps their imports call for.
+
+    Exit 0 when the result needs no hand fixes, 1 otherwise -- the MANUAL
+    lines say what is left.
+    """
+    from lirk.fix import apply_plan, plan_fixes
+    from lirk.scaffold import draft_packages, write_drafts
+
+    drafts, kept = draft_packages(root)
+    for package in kept:
+        print(f"  kept   {package or '(root)'}/{BUILD_FILENAME}: already exists", flush=True)
+    if not drafts:
+        print("lirk: nothing to draft -- every package with Python files has a BUILD.lirk")
+        return 0
+
+    for d in drafts:
+        parts = []
+        if d.srcs:
+            parts.append(f"library :{d.name} ({len(d.srcs)} srcs)")
+        if d.tests:
+            parts.append(f"test :{d.name}_test ({len(d.tests)} srcs, {d.runner})")
+        where = f"{d.package}/{BUILD_FILENAME}" if d.package else BUILD_FILENAME
+        verb = "would create" if dry_run else "created"
+        print(f"  {verb} {where}: {'; '.join(parts)}", flush=True)
+
+    if dry_run:
+        print(
+            f"lirk: dry run -- would draft {len(drafts)} BUILD.lirk file(s); "
+            "deps are derived from imports once the files exist"
+        )
+        return 0
+
+    created = write_drafts(root, drafts)
+    loaded = _load_graph(root)
+    if loaded is None:
+        return 1
+    graph, order = loaded
+    scope = [l for l in order if l in set(created)]
+    applied = apply_plan(root, graph, plan_fixes(root, graph, scope), write=True)
+    for label, deps in applied.additions.items():
+        print(f"  deps   {label}: {', '.join(deps)}", flush=True)
+    for label, reason in applied.manual:
+        print(f"  MANUAL {label}: {reason}", flush=True)
+
+    print(
+        f"lirk: drafted {len(drafts)} BUILD.lirk file(s), {len(created)} target(s); "
+        f"{len(applied.manual)} need a hand fix"
+    )
+    print("lirk: next: review the files, declare runtime-read files as `data`, "
+          "then `lirk test //...`")
+    return 1 if applied.manual else 0
+
+
 def cmd_clean(root: Path) -> int:
     """Delete the incremental-build cache, and any temp file an
     interrupted save left beside it.
@@ -689,6 +745,18 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     )
     fix_p.add_argument("--root", type=Path, default=None, help=root_help)
 
+    init_p = sub.add_parser(
+        "init", help="draft BUILD.lirk files for packages that have none"
+    )
+    init_p.add_argument(
+        "--dry-run", action="store_true", help="list the files without writing them"
+    )
+    init_p.add_argument(
+        "--root", type=Path, default=None,
+        help="repo root (default: nearest .lirk-root, else cwd -- which "
+             "init then marks with a new .lirk-root)",
+    )
+
     clean_p = sub.add_parser("clean", help="delete the incremental-build cache")
     clean_p.add_argument("--root", type=Path, default=None, help=root_help)
 
@@ -715,6 +783,8 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         return cmd_build(root, args.labels, force=args.force)
     if args.command == "clean":
         return cmd_clean(root)
+    if args.command == "init":
+        return cmd_init(root, dry_run=args.dry_run)
     if args.command == "fix":
         return cmd_fix(root, args.labels, dry_run=args.dry_run)
     if args.command == "verify":
