@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-11-21): 176 tests, `python3 -m
+Last verified against source (2026-11-21): 184 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
 `lirk build //...` (13 targets) and `lirk test //...` (5 test targets)
 — which runs alongside the unittest invocation rather than replacing
@@ -220,6 +220,63 @@ reader can't get from the investigation to the upstream thread or its
 status. *What's left:* paste the issue link in.
 
 ---
+
+## Roadmap (proposed 2026-11-21)
+
+**The position lirk should own:** the build tool that runs where heavier
+ones can't (iSH, Termux, Raspberry Pi, Chromebooks, locked-down
+machines, cheap CI), and whose green you can believe. Not a smaller
+Bazel. Every feature should strengthen one of three things: **trust**
+(a cached green is always a real green), **adoption** (minutes to
+convert a repo, not an afternoon) or **reach** (runs anywhere Python
+does). Python-only, `library`/`test`-only stays the scope.
+
+| Milestone | Theme | Contents |
+|---|---|---|
+| **v1.0** | Tag it | Version decision, PyPI (F9), CI matrix (F1) |
+| **v1.x** | Trust and adoption | ~~Environment fingerprinting~~ (done), `lirk verify`, pytest runner, `lirk fix` / `lirk init` |
+| **v1.y** | Speed without parallelism | `--changed`, per-target timings (F2), `--fail-fast` (F4), repo-wide timeout (F3) |
+| **v2** | Teams | JSON / JUnit-XML output, a GitHub Action; opt-in `-j` only with evidence |
+
+- [x] **R1 — Fingerprint the Python environment.** Done 2026-11-21:
+  the interpreter version and installed distributions are folded into
+  every fingerprint (DESIGN §4). Closed a real stale-PASS path: upgrading
+  Python or a package left everything `cached`.
+- [ ] **R2 — `lirk verify`.** Re-run a random sample of `cached`
+  targets with the cache bypassed, and fail if any disagree with their
+  cached result. Turns criterion 2's "zero cache-correctness bugs" from
+  a reported number into a measured one, and gives adopters a cheap
+  periodic check.
+- [ ] **R3 — pytest runner.** `runner = "pytest"` on a `test` target:
+  still one `subprocess.run()` per src (`python3 -m pytest <src>`),
+  output passed through raw. Most Python repos use pytest, which makes
+  this the largest single adoption barrier. Needs its own "no tests
+  collected" detection (pytest exits 5), mirroring L1.
+- [ ] **R4 — `lirk fix` and `lirk init`.** The import check already
+  knows the exact missing `deps` label; `fix` writes it into the BUILD
+  file instead of only failing. `init` generates first-draft BUILD files
+  for an existing repo from its imports. Rewriting TOML without
+  destroying comments needs care (no stdlib TOML writer) — likely
+  append-only edits to a `deps` line.
+- [ ] **R5 — `lirk test --changed [ref]`.** Run only targets whose
+  closure contains a file changed since `ref` (default: the working
+  tree versus `HEAD`). Reverse-closure over the existing graph; the
+  `git diff --name-only` call is a plain subprocess, outside the action
+  model.
+- [ ] **R6 — Machine-readable results.** Optional `--report json` /
+  JUnit XML written *after* the run, for CI dashboards. Writing a report
+  is fine; DESIGN §1 forbids only *reading* test results back from a
+  file.
+- [ ] **R7 — Opt-in parallelism, maybe never.** The v1 criteria now
+  permit it, but it reintroduces the concurrent-lifecycle surface lirk
+  exists to avoid. Serial stays the default permanently; an opt-in `-j`
+  is considered only if users ask, and only after a long soak test
+  hunting `signal: hangup`. One hangup and lirk loses its reason to
+  exist.
+
+**Deliberately not on the roadmap:** other languages, genrules,
+remote caching, sandboxing. Each widens what has to stay correct, in
+territory Bazel already covers.
 
 ## Feature ideas (proposed 2026-11-21)
 

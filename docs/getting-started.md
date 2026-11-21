@@ -503,6 +503,10 @@ Two behaviours worth knowing up front:
 
 - **Only successes are cached.** A failure is always retried next run,
   even if nothing changed.
+- **Changing your Python environment reruns everything once.**
+  Upgrading Python, or installing, upgrading or removing any package,
+  changes every target's fingerprint, since a test that passed against
+  the old versions may not pass against the new ones.
 - **`SKIP` is not a pass.** A target whose dependency failed is never
   run and never counted as passing, so a broken library can't produce a
   green test run beneath it.

@@ -3,6 +3,8 @@
 A target's fingerprint covers its own declared shape (name, type,
 deps) plus the contents of its source files plus the fingerprints of
 its dependencies, so any change propagates to every dependent target.
+Every fingerprint also folds in the Python environment the actions run
+under (see environment_fingerprint).
 Fingerprints are compared against a cache of the last successful
 build/test run (.lirk-cache.json) to decide what can be skipped.
 """
@@ -12,6 +14,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import site
+import sys
 from pathlib import Path
 
 from lirk.graph import Graph
@@ -58,15 +62,83 @@ def _directory_entries(directory: Path) -> list[tuple[str, Path]]:
     return sorted(entries)
 
 
+def _site_dirs() -> list[str]:
+    """The interpreter's site-packages directories, system and user.
+
+    getattr-guarded: some embedded and very old virtualenv builds of
+    `site` lack one or both functions.
+    """
+    dirs: list[str] = []
+    get_global = getattr(site, "getsitepackages", None)
+    if get_global is not None:
+        dirs.extend(get_global())
+    get_user = getattr(site, "getusersitepackages", None)
+    if get_user is not None:
+        dirs.append(get_user())
+    return dirs
+
+
+def _installed_distributions(site_dirs: list[str]) -> list[str]:
+    """Every installed distribution, as its metadata directory name.
+
+    Those names carry the version (`requests-2.31.0.dist-info`), so a
+    listing is enough to see an install, an upgrade or a removal --
+    one directory read per site dir, rather than importlib.metadata,
+    which would add to the startup cost DESIGN.md §6 keeps off the
+    common path. A missing or unreadable directory contributes nothing:
+    it holds no packages to go stale.
+    """
+    found: set[str] = set()
+    for directory in site_dirs:
+        try:
+            names = os.listdir(directory)
+        except OSError:
+            continue
+        found.update(
+            n for n in names if n.endswith((".dist-info", ".egg-info"))
+        )
+    return sorted(found)
+
+
+def environment_fingerprint(site_dirs: list[str] | None = None) -> str:
+    """A hash of the Python environment that builds and tests run under.
+
+    Tests execute under sys.executable, so the interpreter and the
+    packages installed for it are as much inputs as the srcs are -- but
+    none of them are files in the repo. Without this, upgrading Python
+    or a library left every target `cached` and green: a stale PASS
+    that --force could turn into a FAIL, the exact defect class v1
+    criterion 2 forbids. ast.parse depends on the interpreter version
+    too (new syntax), so build results are covered as well as tests.
+
+    Conservative by design: any patch release or any package change
+    reruns everything once. Erring toward redundant work, never toward
+    a false pass, is the direction DESIGN.md §4 requires.
+    """
+    h = hashlib.sha256()
+    h.update(sys.implementation.name.encode())
+    h.update(".".join(map(str, sys.version_info[:3])).encode())
+    dirs = _site_dirs() if site_dirs is None else site_dirs
+    for dist in _installed_distributions(dirs):
+        h.update(dist.encode())
+        h.update(b"\0")
+    return h.hexdigest()
+
+
 def compute_fingerprints(
-    graph: Graph, root: Path, order: list[str]
+    graph: Graph, root: Path, order: list[str], environment: str | None = None
 ) -> dict[str, str]:
     """Compute a content fingerprint per target.
 
     `order` must be a topological order (dependencies before
     dependents) so each dependency's fingerprint is already known
     when its dependents are processed.
+
+    `environment` defaults to environment_fingerprint(), computed once
+    per call; it is a parameter so tests can hold it fixed or vary it.
     """
+    if environment is None:
+        environment = environment_fingerprint()
     fingerprints: dict[str, str] = {}
 
     for label in order:
@@ -75,6 +147,7 @@ def compute_fingerprints(
         h.update(target.name.encode())
         h.update(target.type.encode())
         h.update(str(ACTION_VERSION).encode())
+        h.update(environment.encode())
         if target.timeout is not None:
             # Folded in only when set, so targets without one keep the
             # fingerprint shape they always had. A pass under a 600s
