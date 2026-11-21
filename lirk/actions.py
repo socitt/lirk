@@ -91,6 +91,8 @@ class ActionResult:
     message: str
     stdout: str = ""
     stderr: str = ""
+    # Things worth telling the user that don't fail the target.
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -405,7 +407,50 @@ def validate_target(
                 target.label, False, "; ".join(undeclared)
             )
 
-    return ActionResult(target.label, True, "ok")
+    return ActionResult(target.label, True, "ok", notes=path_loads(parsed))
+
+
+# Calls that load Python code from a file path rather than by import.
+# Their argument is almost always computed (`HERE / "runner.py"`), so the
+# file can't be resolved statically -- but the call itself can be seen.
+_PATH_LOADERS = {
+    "spec_from_file_location", "SourceFileLoader", "SourcelessFileLoader",
+    "run_path", "load_source",
+}
+
+
+def path_loads(parsed: Iterable[tuple[str, ast.AST]]) -> list[str]:
+    """A note for each src that loads code by file path.
+
+    lirk can't follow such a load, so its target may depend on code that
+    no `deps` entry names -- and then editing that code leaves dependent
+    tests cached and green. Found in terminal-projects, where
+    furminal/runner.py loads region-explorer by path: a stale PASS that
+    `lirk verify` caught and plain `lirk test` couldn't. A note rather
+    than a failure, because a correctly declared target looks the same;
+    it is printed only when the target is rebuilt, i.e. when the file
+    changes, not on every run.
+    """
+    notes = []
+    for src, tree in parsed:
+        calls = sorted({
+            name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            for name in [
+                node.func.attr if isinstance(node.func, ast.Attribute)
+                else node.func.id if isinstance(node.func, ast.Name)
+                else None
+            ]
+            if name in _PATH_LOADERS
+        })
+        if calls:
+            notes.append(
+                f"{src} loads code by file path ({', '.join(calls)}); lirk can't "
+                "follow that, so make sure this target's deps include whatever "
+                "it loads (`lirk verify --mutate` can check)"
+            )
+    return notes
 
 
 def parse_target(
@@ -610,5 +655,6 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
         )
 
     return ActionResult(
-        target.label, True, "passed", "\n".join(stdout_parts), "\n".join(stderr_parts)
+        target.label, True, "passed", "\n".join(stdout_parts), "\n".join(stderr_parts),
+        notes=validation.notes,
     )

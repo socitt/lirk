@@ -41,6 +41,12 @@ srcs = ["fix.py"]
 deps = [":actions", ":graph", ":targets"]
 
 [[target]]
+name = "mutate"
+type = "library"
+srcs = ["mutate.py"]
+deps = [":actions", ":graph"]
+
+[[target]]
 name = "scaffold"
 type = "library"
 srcs = ["scaffold.py"]
@@ -50,7 +56,7 @@ deps = [":targets"]
 name = "cli"
 type = "library"
 srcs = ["cli.py"]
-deps = [":actions", ":cache", ":fix", ":graph", ":scaffold", ":targets"]
+deps = [":actions", ":cache", ":fix", ":graph", ":mutate", ":scaffold", ":targets"]
 
 [[target]]
 name = "main"

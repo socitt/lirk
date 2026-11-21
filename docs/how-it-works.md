@@ -70,6 +70,12 @@ ignored.
 This is the difference between lirk and tools that trust the
 dependency graph as written: lirk verifies it on every change.
 
+What an import scan can't see is code loaded by a computed file path
+(`importlib.util.spec_from_file_location(..., HERE / "runner.py")`).
+lirk prints a note when a file does that, and `lirk verify --mutate`
+checks such dependencies by behaviour: it breaks each source in turn and
+watches which tests fail.
+
 ## Data files
 
 The import check can't see files a test opens at runtime. Those must be

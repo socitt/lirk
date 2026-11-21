@@ -214,8 +214,10 @@ you. That matters: without the dep, editing your entry point would
 leave this test cached and green.
 
 If your test starts the program another way, for example by running a
-script by its file path, lirk can't see the connection. Add the dep
-yourself, and the file to `data` if it isn't in some target's `srcs`.
+script by its file path, or your code loads modules by path with
+`importlib`, lirk can't see the connection. Add the dep yourself, and
+run `lirk verify --mutate` now and then: it finds any dependency like
+this that nothing declares.
 
 Check the output as well as the exit code. A program whose `main()` is
 never called exits 0 too.
