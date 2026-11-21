@@ -240,7 +240,7 @@ def import_problems(
     import whether or not the edge is declared -- so an undeclared edge
     is not merely undocumented, it is *absent from the fingerprint*, and
     editing the imported package invalidates nothing. The result is a
-    cached PASS that `--force` turns into a FAIL. See docs/TASKS.md H1.
+    cached PASS that `--force` turns into a FAIL. See docs/dev/TASKS.md H1.
 
     Checked against the transitive closure, not direct deps only: the
     stale-input problem is closed as soon as the dependency is folded
@@ -255,7 +255,7 @@ def import_problems(
     input with no owner to name. Rejecting rather than fingerprinting it
     implicitly keeps the graph fully explicit, and gets transitivity for
     free -- once the file must be declared, whatever *it* imports falls
-    under the rule above (docs/TASKS.md H2).
+    under the rule above (docs/dev/TASKS.md H2).
 
     Only the module the dotted path resolves to is checked, not the
     `__init__.py` of each package along the way (see _resolve_module).

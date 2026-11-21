@@ -29,7 +29,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/socitt/lirk"
-Documentation = "https://github.com/socitt/lirk/blob/main/docs/getting-started.md"
+Documentation = "https://socitt.github.io/lirk/"
 Issues = "https://github.com/socitt/lirk/issues"
 Changelog = "https://github.com/socitt/lirk/releases"
 

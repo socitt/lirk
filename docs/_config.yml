@@ -1,5 +1,5 @@
 title: lirk
-description: A minimal, Bazel/Please-inspired build tool for Python monorepos.
+description: A small build and test tool for Python monorepos that only reruns what changed, and never reports a stale pass.
 markdown: kramdown
 
 # Project page (socitt/lirk, not socitt.github.io) -- served under a
@@ -7,14 +7,8 @@ markdown: kramdown
 url: "https://socitt.github.io"
 baseurl: "/lirk"
 
-# Internal contributor docs and working logs: not user-facing reference.
-# Left in the repo (viewable via normal GitHub browsing) but not built
-# into the Pages site or its nav.
+# Maintainer docs (dev/) and historical material (archive/) stay in the
+# repo, browsable on GitHub, but are not built into the user-facing site.
 exclude:
-  - DESIGN.md
-  - TASKS.md
-  - ACTIVE_SESSION.md
-  - KNOWN_ISSUES.md
-  - assessments/
-  - reviews/
-  - design/
+  - dev/
+  - archive/

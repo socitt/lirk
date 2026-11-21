@@ -68,6 +68,28 @@
     pre.mermaid { background: none; padding: 0; overflow-x: auto; }
     table { border-collapse: collapse; width: 100%; }
     th, td { border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; }
+    .lead { font-size: 1.15rem; color: var(--muted); }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+      gap: 0.75rem;
+      margin: 1.25rem 0;
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.8rem 1rem;
+    }
+    .card strong { display: block; margin-bottom: 0.25rem; }
+    .card p { margin: 0; font-size: 0.95rem; color: var(--muted); }
+    blockquote {
+      margin: 1rem 0;
+      padding: 0.5rem 1rem;
+      border-left: 3px solid var(--link);
+      background: var(--code-bg);
+      border-radius: 0 4px 4px 0;
+    }
+    blockquote p { margin: 0.3rem 0; }
     footer {
       max-width: 46rem;
       margin: 0 auto;
@@ -83,18 +105,21 @@
     <nav>
       <a href="{{ '/' | relative_url }}">Overview</a>
       <a href="{{ '/getting-started.html' | relative_url }}">Getting started</a>
+      <a href="{{ '/adopting.html' | relative_url }}">Existing repos</a>
+      <a href="{{ '/build-format.html' | relative_url }}">BUILD files</a>
+      <a href="{{ '/commands.html' | relative_url }}">Commands</a>
       <a href="{{ '/how-it-works.html' | relative_url }}">How it works</a>
-      <a href="{{ '/build-format.html' | relative_url }}">BUILD.lirk format</a>
-      <a href="{{ site.github.repository_url | default: 'https://github.com/socitt/lirk' }}">GitHub</a>
-      <a href="https://github.com/socitt/lirk/blob/main/docs/KNOWN_ISSUES.md">Known issues</a>
+      <a href="{{ '/troubleshooting.html' | relative_url }}">Troubleshooting</a>
+      <a href="https://github.com/socitt/lirk">GitHub</a>
     </nav>
   </header>
   <main>
     {{ content }}
   </main>
   <footer>
-    lirk is early-development software. Source and full history on
-    <a href="https://github.com/socitt/lirk">GitHub</a>.
+    lirk 1.0 · MIT licensed ·
+    <a href="https://github.com/socitt/lirk">source</a> ·
+    <a href="https://github.com/socitt/lirk/issues">report a problem</a>
   </footer>
   <script type="module">
     import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";

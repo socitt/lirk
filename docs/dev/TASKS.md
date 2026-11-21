@@ -360,6 +360,15 @@ The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
 
 ## Recently closed
 
+- **Docs rewritten for users** (2026-11-21). The published site now
+  leads with what lirk does and why to use it: Overview, Getting
+  started, Existing repos, BUILD files, Commands, How it works and
+  Troubleshooting. The tutorial was re-run verbatim to confirm its
+  output. Maintainer docs moved to `docs/dev/`, and history (the
+  original docs, assessments, reviews, session log) to `docs/archive/`.
+  Both are excluded from the site. A short README and a new
+  CONTRIBUTING.md replace the long README.
+
 - **v1.0.0 released** (2026-11-21). Tagged on `main` at the PR #3 merge
   (`39047ee`), so the release includes all of v1.x: environment
   fingerprinting, pytest runner, `verify`, `fix`, `init`, CI, timings,

@@ -1,227 +1,105 @@
 # lirk
 
-A minimal, Bazel/Please-inspired build tool for Python monorepos.
+[![CI](https://github.com/socitt/lirk/actions/workflows/ci.yml/badge.svg)](https://github.com/socitt/lirk/actions/workflows/ci.yml)
 
-## Why this exists
+**A small build and test tool for Python monorepos.** It reruns only
+what your change affected, and it's built so that a green result is
+never a stale one.
 
-lirk exists because of a bug we couldn't fully root-cause in
-[Please](https://please.build), a Bazel-alike build tool, while using
-it on iSH-AOK (a Linux userland running natively on iOS). Build and
-test actions would intermittently fail with `signal: hangup` —
-non-deterministically, with no problem in the underlying build/test
-logic itself. Extensive debugging narrowed the likely cause to
-something in Please's process-group/session-control handling around
-subprocess execution: it got measurably worse when multiple
-invocations shared a session, and in one case the hangup happened
-*after* a test binary had already exited successfully, during
-Please's own results-capture step. That points at process
-lifecycle/session teardown handling, not the commands being run.
-
-Rather than keep chasing a bug in someone else's process model, lirk
-takes the opposite approach: use the simplest possible subprocess
-invocation model available, and avoid every pattern suspected of
-contributing to the original failure. Concretely, lirk:
-
-- Never creates new process groups or sessions for spawned actions
-  (no `setsid`, no `os.setpgrp`).
-- Never uses pseudo-terminals to spawn build/test commands.
-- Runs every action via a single, direct `subprocess.run()` call —
-  no manual fork/exec, no custom signal handling.
-- Does no process-tree sandboxing or isolation of build actions.
-  Trusts the local filesystem directly.
-- Never splits test execution into a "run, write results to a file,
-  read the file back" sequence. Output and exit code are captured
-  directly from the same `subprocess.run()` call that ran the test.
-- Runs builds serially in v1. No per-action process groups, no
-  parallelism, until serial execution is proven stable — see the v1
-  stability criteria under Status below for exactly what that means.
-
-This is a narrower, more conservative subprocess model than a
-general-purpose build tool needs — that's the point. It trades away
-sandboxing and parallelism (both easy to add later) in exchange for
-a process model simple enough to reason about directly on the
-device where the original bug appeared.
-
-Separately, real Bazel was ruled out too: on this device the JVM
-itself cannot start at all (confirmed independent of Bazel — see
-[`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md)), so Bazel is
-structurally impossible here, not just impractical.
-
-## How it works
-
-A repo declares targets in `BUILD.lirk` files (TOML), one per
-package directory. Each target is a `library` (a set of `.py` srcs
-other targets can depend on) or a `test` (srcs run via `python3 -m
-unittest`). Deps are expressed as `//package:name` labels (or
-`:name` for a same-package sibling), and can cross package
-directories freely:
-
-```mermaid
-graph LR
-    a_test["//a:a_test (test)"] --> a_lib["//a:a_lib (library)"]
-    a_lib --> b_lib["//b:b_lib (library)"]
-    b_lib --> c_lib["//c:c_lib (library)"]
-```
-
-`lirk build //...` or `lirk test //pkg:name` then runs this
-pipeline:
-
-```mermaid
-flowchart TD
-    A["lirk build/test //label"] --> B["find repo root\n(.lirk-root marker, else cwd)"]
-    B --> C["scan for BUILD.lirk files,\nparse targets"]
-    C --> D["build dependency graph,\ntopological sort"]
-    D --> E["narrow to the requested target's\ntransitive closure"]
-    E --> F["content-hash fingerprint\neach target (srcs + dep fingerprints)"]
-    F --> G{"fingerprint matches\n.lirk-cache.json?"}
-    G -- yes --> H["skip: report cached"]
-    G -- no --> I["build: validate srcs exist + parse as Python\ntest: subprocess.run() per src\n(one direct call, no pty/process group)"]
-    I --> J["write result to\n.lirk-cache.json (atomic)"]
-```
-
-Only successful results are cached, so a failure is retried on the
-next run even with an unchanged fingerprint. See "Why this exists"
-above for why the test step is one direct `subprocess.run()` call
-and nothing fancier.
-
-## Installation
-
-Python 3.11+, no other dependencies:
-
-```
+```sh
 pip install lirk
+cd your-repo
+lirk init          # draft BUILD files from your code's real imports
+lirk test //...    # run everything; next time, only what changed
 ```
 
-Or from a checkout, which is useful for working on lirk itself:
+**[Documentation →](https://socitt.github.io/lirk/)**
 
-```
-git clone https://github.com/socitt/lirk.git
-cd lirk
-pip install -e .
-```
+## Why lirk
 
-Either way installs a `lirk` console script on `PATH`:
+- **Only reruns what changed.** Targets are fingerprinted by content.
+  Edit one module and only the tests that depend on it run again.
+- **Green means green.** Imports are checked against declared deps, so
+  the dependency graph can't silently drift. Your Python version,
+  installed packages and pytest config are part of every fingerprint.
+  `lirk verify` audits cached results against fresh runs.
+- **Minutes to adopt.** `lirk init` writes your BUILD files, and
+  `lirk fix` keeps their deps correct as the code changes.
+- **Your tests, unchanged.** Plain `unittest` or `pytest`, with output
+  passed through exactly as your runner printed it.
+- **Runs anywhere Python 3.11 does.** No dependencies, no daemon, no
+  JVM. Tested on Linux and macOS, and built to run on an iPhone under
+  iSH.
 
-```
-lirk init                         # draft BUILD files for an existing repo
-lirk build //...                  # everything
-lirk test //app/... //lib:all     # a subtree, plus one whole package
-lirk test //app:app_test --force  # one target, ignoring the cache
-lirk fix                          # add deps the import check says are missing
-lirk verify --sample 5            # re-check cached results against fresh runs
-lirk clean                        # discard the incremental-build cache
-```
+## What it looks like
 
-## Scope (v1)
+One `BUILD.lirk` per package directory, in plain TOML:
 
-lirk currently only supports Python targets: `library` and `test`.
-No binaries, no genrules, no other languages yet, and no new
-languages or target types will be added until the v1 stability
-criteria below are met — this is a hold, not just a "later." The
-goal is to prove the core approach (dependency graph, incremental
-builds via content hashing, direct subprocess execution) works
-reliably before expanding scope.
+```toml
+[[target]]
+name = "physics"
+type = "library"
+srcs = ["gravity.py", "integrators.py"]
+deps = ["//vecmath:vecmath"]
 
-## Using lirk in a repo
-
-**[docs/getting-started.md](docs/getting-started.md) is the full
-walkthrough** — a worked two-package example with real output, how to
-convert an existing repo (including the import model, which is where
-real repos stumble), the complete command reference, and
-troubleshooting keyed to actual error messages. The essentials:
-
-A repo with `BUILD.lirk` files should gitignore the artifacts lirk
-generates alongside your source:
-
-```
-.lirk-cache.json
-.lirk-cache.json.*.tmp
-__pycache__/
-*.pyc
+[[target]]
+name = "physics_test"
+type = "test"
+runner = "pytest"
+srcs = ["test_gravity.py", "test_integrators.py"]
+deps = [":physics"]
 ```
 
-`.lirk-cache.json` is lirk's incremental-build cache, written at the
-repo root; it's local state, not something to commit or share. The
-`.tmp` line covers the temporary file a save interrupted mid-write can
-leave beside it (`lirk clean` removes those too).
+```
+$ lirk test //...
+  cached  //vecmath:vecmath
+  built  //physics:physics
+  PASS   //physics:physics_test (3.1s)
+  cached  //render:render_test
+lirk: 2/2 tests passed
+lirk: OK
+```
 
-### Repo root
+## Commands
 
-lirk needs to know your repo root to scope its target search and
-resolve `//`-prefixed labels. By default it uses the current
-directory, walking upward for a `.lirk-root` marker file first — drop
-an empty `.lirk-root` at your repo's top level and `lirk build`/`lirk
-test` will find it correctly even when run from a subdirectory.
-Without the marker, lirk scopes to whatever directory it was invoked
-from, which can make targets outside that subtree look "missing" rather
-than out of scope — so it says so, naming the directory it chose, and
-every graph or unknown-target error prints the root it resolved
-against. `--root <path>` overrides discovery entirely.
+| | |
+|---|---|
+| `lirk test <label>...` | Run tests, and check what they depend on |
+| `lirk build <label>...` | Check targets without running tests |
+| `lirk init` | Draft BUILD files for an existing repo |
+| `lirk fix` | Add missing deps from your imports |
+| `lirk verify` | Recheck cached results against fresh runs |
+| `lirk clean` | Delete the cache |
 
-## Status
+Labels: `//...` (everything), `//app/...` (a directory and below),
+`//app:all` (one directory), `//app:app_test` (one target).
 
-**1.0.0.** All three v1 criteria below hold and no known stale-PASS
-path is open, so the package version is 1.0.0. Serial execution
-remains the default; see the roadmap in
-[`docs/TASKS.md`](docs/TASKS.md) for what comes next.
+## Documentation
 
-**v1 stability criteria.** Serial execution counts as "proven stable"
-(unblocking parallelism work), and lirk is ready to expand scope
-beyond `library`/`test` Python targets, once *all three* of the
-following hold. This replaces the earlier "proven stable"/"not yet
-self-hosting" language with a concrete, non-subjective bar:
+- [Getting started](https://socitt.github.io/lirk/getting-started.html):
+  a new repo in five minutes
+- [Existing repos](https://socitt.github.io/lirk/adopting.html):
+  `lirk init` and what to review
+- [BUILD files](https://socitt.github.io/lirk/build-format.html) and
+  [Commands](https://socitt.github.io/lirk/commands.html): reference
+- [How it works](https://socitt.github.io/lirk/how-it-works.html):
+  why a cached result can be trusted
+- [Troubleshooting](https://socitt.github.io/lirk/troubleshooting.html)
 
-1. **Self-hosting.** lirk builds and tests its own source through its
-   own `BUILD.lirk` files (`lirk build //...` / `lirk test //...` run
-   against this repo), not only via a separately maintained
-   `pytest`/`unittest` suite. **Met** (2026-08-02) — `lirk/BUILD.lirk`
-   and `tests/BUILD.lirk` describe 13 targets mirroring the real import
-   graph. The self-hosted run happens *alongside* `unittest discover`,
-   not instead of it: an independent runner is what would catch lirk
-   reporting a false green about itself.
-2. **Track record on real repos.** At least 200 cumulative `lirk
-   build`/`lirk test` invocations across at least 3 distinct real
-   (non-fixture, non-lirk) repos, with zero `signal: hangup`
-   occurrences and zero cache-correctness bugs (a `cached` result that
-   disagrees with what a `--force` fresh run produces). **Met**
-   (2026-08-03) — ~187 invocations documented against a games monorepo
-   (tallied 2026-07-30), self-hosting as the second repo, and
-   `termrery`, a curses orrery built under lirk from its first commit,
-   as the third. No `signal: hangup` has ever been observed, in any
-   repo, in any session. See [`docs/TASKS.md`](docs/TASKS.md) for the
-   caveats. The third repo surfaced a cache-correctness path — an
-   undeclared import cached a stale green — which is now detected and
-   failed at build time, as is its narrower sibling, an import of a file
-   no target declares (2026-08-04). No known stale-green path is open.
-3. **`docs/KNOWN_ISSUES.md` clear.** No open entries beyond ones
-   explicitly marked cosmetic-only. **Met** as of this writing (one
-   entry on record, status: Fixed).
+## Background
 
-Until all three are explicitly confirmed met, no parallelism work
-starts and no new languages or target types are added — see Scope
-above.
+lirk was written after a Bazel-style build tool kept failing
+intermittently on iSH (a Linux environment for iPhone), in a way traced
+to how it managed processes. So lirk does the opposite: each test file
+is one plain, direct subprocess, run one at a time, with no daemon,
+sandbox or process groups. It has since been used across several real
+repos, including itself, without that class of failure. The original
+write-up lives in [`docs/archive/`](docs/archive/).
 
 ## Contributing
 
-Two docs carry the current state of the project, and both are living
-references — overwritten as things change, not appended to:
-
-- [`docs/DESIGN.md`](docs/DESIGN.md) — the architecture as it is now:
-  the process-model constraints and why they exist, the target/label
-  model, the pipeline, the caching model, and the settled decisions
-  that shouldn't be re-opened.
-- [`docs/TASKS.md`](docs/TASKS.md) — the backlog: v1 criteria with
-  honest status, open bugs, and next actions in priority order.
-
-Read DESIGN.md before changing anything in `lirk/`.
-
-Run both test paths before pushing — they are not redundant:
-
-```sh
-python3 -m unittest discover -s tests -t .   # source of truth
-python3 -m lirk test //...                   # self-hosted, ~2m45s
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
