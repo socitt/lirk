@@ -123,6 +123,21 @@ def parse_build_file(path: Path, package: str) -> list[Target]:
             data = tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: invalid TOML: {e}") from e
+    return _targets_from_data(data, path, package)
+
+
+def parse_build_text(text: str, path: Path, package: str) -> list[Target]:
+    """Like parse_build_file, for contents not (yet) on disk. `path` is
+    used only in error messages. Lets `lirk fix` check an edit before
+    writing it, without a temp file in the user's tree."""
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"{path}: invalid TOML: {e}") from e
+    return _targets_from_data(data, path, package)
+
+
+def _targets_from_data(data: dict, path: Path, package: str) -> list[Target]:
 
     raw_targets = data.get("target", [])
     if not isinstance(raw_targets, list):

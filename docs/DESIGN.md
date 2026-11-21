@@ -344,6 +344,20 @@ The index once kept a single owner, whichever declaration was indexed
 last, which made a correct `deps` entry on the other declaring target
 report as an undeclared import.
 
+**`lirk fix` turns the diagnosis into an edit.** `import_problems`
+returns structured findings (src, module, file, owners), and `fix`
+adds a `deps` entry wherever exactly one target owns the imported file.
+It never guesses (two owners, or none, is reported for a hand fix),
+never closes a cycle (checked against the graph *plus* additions
+already planned in the same run, so mutual imports can't both be
+"fixed" into a loop), and drops any addition another addition already
+reaches. There is no stdlib TOML writer, so edits are textual, which
+also preserves comments. The safety net is verification, not the
+editor's cleverness: each edited file is re-parsed from the new text,
+and unless it declares exactly the original targets with exactly the
+planned deps appended and nothing else disturbed, the file is left
+untouched and the change reported for a hand fix.
+
 `ImportEnv` (the owner index plus the target's allowed labels) is built
 by `cli.py` and passed in, so `actions.py` still doesn't import the
 graph layer. When it is absent, `validate_target` does the syntax check
@@ -444,6 +458,19 @@ through any rework.
 
 `--force` / `--rebuild` / `--rerun` bypasses the cache *check* without
 deleting or truncating the cache file.
+
+**`lirk verify` audits the cache instead of trusting it.** Every
+`mode:label` entry that is valid right now is a claim — "a fresh run
+would pass" — and verify re-does what that mode did for that target
+(run the tests, or validate) and compares. A failure is a stale green:
+some input the fingerprint does not cover, in lirk or in the BUILD files
+(most often a file read at runtime but not declared in `data`). It is
+printed as `STALE`, the entry is deleted so the next ordinary run tells
+the truth, and the exit status is 1. Targets with no valid entry are
+counted, not run, since there is no claim to check. `--sample N` audits
+a random subset with a printed seed, for a cheap periodic check. This is
+what turns v1 criterion 2's "zero cache-correctness bugs" from a
+reported number into a measured one.
 
 ---
 
@@ -632,7 +659,8 @@ Recorded so a later session doesn't relitigate them:
 | `lirk/targets.py` | `Target` dataclass; parse and validate one `BUILD.lirk` |
 | `lirk/graph.py` | Scan repo, resolve labels, build `Graph`, topological sort, transitive closure |
 | `lirk/cache.py` | `ACTION_VERSION`, fingerprints, atomic cache load/save, `needs_build` |
-| `lirk/actions.py` | `missing_files`, `validate_target`, `run_test` — the only place a subprocess is spawned |
+| `lirk/actions.py` | `missing_files`, `validate_target`, `run_test`, the import check (`import_problems`) — the only place a subprocess is spawned |
+| `lirk/fix.py` | `lirk fix`: plan `deps` additions from `import_problems`, edit BUILD files textually, verify by re-parse before writing |
 | `lirk/cli.py` | Arg parsing, label patterns, root discovery, `_execute` loop, summaries, `clean`, exit codes |
 | `bin/lirk` | Path-inserting shim for running from a checkout without installing |
 

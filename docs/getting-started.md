@@ -461,6 +461,8 @@ The entire CLI is two subcommands:
 |---|---|
 | `lirk build <label>...` | Check every declared file exists, every src parses as Python, and every cross-package import is declared in `deps`, for the targets and their transitive deps. |
 | `lirk test <label>...` | Run each test src via `python3 -m unittest`, after building its deps. |
+| `lirk verify [label...]` | Re-run every currently-cached result in scope (default `//...`) with the cache bypassed, and fail on any that no longer passes. `--sample N` checks a random N instead; `--seed` reproduces a sample. A disagreement prints `STALE`, and that cache entry is deleted. |
+| `lirk fix [label...]` | Add the `deps` entries the import check reports as missing (default scope `//...`), editing BUILD files in place with comments preserved. Anything ambiguous, or that would create a cycle, is listed as `MANUAL` instead. `--dry-run` shows the edits without making them. Exit 0 only when nothing needs a hand fix. |
 | `lirk clean` | Delete `.lirk-cache.json` (and any temp file an interrupted run left beside it). The next run redoes everything. |
 
 | Flag | Applies to | Effect |
@@ -575,8 +577,8 @@ still build, and its dependents report `SKIP`.
 
 **`FAIL //cli:cli: render.py imports 'orrery.camera' (//orrery:orrery),
 not in deps`.** A src imports a module belonging to a target this one
-doesn't depend on, directly or transitively. Add the named label to
-that target's `deps`. If the import is genuinely wrong, delete it
+doesn't depend on, directly or transitively. Run `lirk fix` to add it,
+or add the named label to that target's `deps` yourself. If the import is genuinely wrong, delete it
 instead — but don't reach for a workaround: the check exists because an
 undeclared import silently escapes the fingerprint. See [Getting the
 imports right](#getting-the-imports-right).
@@ -626,8 +628,9 @@ you're willing, keep a note of:
   it has never been observed — a single occurrence is a significant
   finding.
 - **Any cache-correctness disagreement:** a `cached` result that
-  differs from what `--force` produces on the same tree. Spot-check
-  this occasionally with `lirk test //... --force`. One such bug has
+  differs from what a fresh run produces on the same tree. `lirk
+  verify` checks exactly this, so run it occasionally (`lirk verify
+  --sample 5` is cheap) and record any `STALE` line. One such bug has
   been found so far (an undeclared fixture directory producing a stale
   PASS), and it was found exactly this way.
 - **Anything in this guide that turned out to be wrong or missing.**
