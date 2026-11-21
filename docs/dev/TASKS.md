@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-11-21): 299 tests, `python3 -m
+Last verified against source (2026-11-21): 309 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
 `lirk build //...` (19 targets) and `lirk test //...` (8 test targets)
 — which runs alongside the unittest invocation rather than replacing
@@ -59,6 +59,21 @@ At least 200 cumulative `lirk build`/`lirk test` invocations across at
 least 3 distinct real (non-fixture, non-lirk) repos, with **zero**
 `signal: hangup` occurrences and **zero** cache-correctness bugs (a
 `cached` result disagreeing with what `--force` produces).
+
+> **Correction (2026-11-21): the zero-cache-bug record did not hold.**
+> Running terminal-projects (lirk's largest consumer, 66 targets) on
+> 1.0.1 found a stale PASS that had existed since 2026-07-30, so it was
+> present when v1.0 was tagged. `furminal/runner.py` loads
+> region-explorer by computed file path (`spec_from_file_location`),
+> invisible to the import check, and the edge was undeclared. Breaking
+> region-explorer left `//furminal:main_test` cached and green while
+> `--force` failed all four of its tests. It is a configuration gap of
+> the same family as H1/H2, not an engine defect, but it is exactly the
+> outcome this clause forbids, and it went unnoticed through the whole
+> tally. Response: a build-time note for path-based loads, and
+> `lirk verify --mutate`, which finds such edges by behaviour (it
+> reports exactly the three on the pre-fix commit, and none after). The
+> `signal: hangup` count is still zero.
 
 **Tallied 2026-07-30** from the archived assessments. Counting only
 explicitly-stated numbers, treating "16+" as 16 and "repeatedly" /
@@ -359,6 +374,23 @@ The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
    concurrent runs become a real workflow.
 
 ## Recently closed
+
+- **terminal-projects on 1.0.1: path-loaded code, and `verify --mutate`**
+  (2026-11-21). See the correction under criterion 2. Two changes:
+  - **A note when a src loads code by file path**
+    (`spec_from_file_location`, `SourceFileLoader`, `runpy.run_path`,
+    `load_source`). The path is almost always computed, so it can't be
+    resolved, but the call can be seen. It's a note, not a failure (a
+    correctly declared target looks the same), printed only when the
+    target is rebuilt.
+  - **`lirk verify --mutate`**, built from terminal-projects' own sweep
+    script. In a copy of the repo, it breaks each library source in turn
+    and runs every passing test that claims not to depend on it; any
+    failure is an undeclared edge. It checks behaviour, so it catches
+    path loads and any other indirection, but not files read only as
+    data. On terminal-projects at the pre-fix commit it finds exactly
+    the three edges (984 test runs, ~80s here); after the fix, none.
+    lirk's own repo: none. `--sample N` and labels bound the cost.
 
 - **slingshot round 2: #9, #12–#15** (2026-11-21), from its
   `docs/lirk-notes.md` (75 invocations, no `signal: hangup`). Each was

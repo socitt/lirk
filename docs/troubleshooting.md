@@ -81,6 +81,15 @@ anything depending on it shows `SKIP`.
 **`syntax error`** or **`not readable as Python source`.** The file
 isn't valid Python, or isn't Python at all.
 
+**`note //x:x: runner.py loads code by file path`.** That file loads
+Python from a path rather than importing it, which lirk can't follow.
+Make sure the target's `deps` include whatever it loads, then confirm
+with `lirk verify --mutate`.
+
+**`STALE //x:x_test depends on y.py (//y:y) without declaring it`**
+(from `lirk verify --mutate`). Add `//y:y` to the deps of the test, or
+of the code that loads `y.py`.
+
 **`MANUAL ...` from `lirk fix` or `lirk init`.** lirk won't guess: the
 imported file belongs to more than one target, or adding the dep would
 create a cycle. The message says which. Decide and edit by hand.

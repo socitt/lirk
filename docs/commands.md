@@ -91,8 +91,25 @@ depends on something it doesn't declare, usually a data file.
 
 | Option | Effect |
 |---|---|
-| `--sample N` | Recheck a random N results instead of all of them. |
+| `--sample N` | Recheck a random N results instead of all of them (with `--mutate`: break N random sources). |
 | `--seed S` | Reproduce a previous sample. |
+| `--mutate` | Hunt for dependencies nothing declares: see below. |
+
+### `lirk verify --mutate`
+
+Finds dependencies your tests really have but `deps` doesn't say, such
+as code loaded by file path, which no import check can follow. In a
+throwaway copy of the repo it breaks each library source file in turn,
+and runs every test that claims not to depend on it. A test that fails
+anyway depends on that file without declaring it:
+
+```
+  STALE  //furminal:main_test depends on region-explorer/runner.py (//region-explorer:runner) without declaring it
+```
+
+Your working tree is never touched. It's slow, roughly (sources) ×
+(tests) runs, so it's an occasional audit: limit it with labels
+(`lirk verify --mutate //app/...`) or `--sample N`.
 
 ## `lirk clean`
 

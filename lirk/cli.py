@@ -399,6 +399,8 @@ def _execute(
             if result.ok:
                 cache[cache_key] = fp
                 print(f"  {verb:6} {label}{timing}", flush=True)
+                for note in result.notes:
+                    print(f"  note   {label}: {note}", flush=True)
                 if is_test:
                     summary.tests_passed += 1
                 else:
@@ -561,6 +563,34 @@ def _fingerprintable(
     except CacheError as e:
         print(f"lirk: {e}", file=sys.stderr)
         return None
+
+
+def cmd_verify_mutate(
+    root: Path, labels: list[str], sample: int | None = None, seed: int | None = None
+) -> int:
+    """`lirk verify --mutate`: see lirk/mutate.py."""
+    from lirk.mutate import find_undeclared_edges
+
+    resolved = _resolve_roots(root, labels, "test")
+    if resolved is None:
+        return 1
+    graph, order, roots = resolved
+    tests = [l for l in order if l in roots]
+    if not tests:
+        print("lirk: no test targets found")
+        return 0
+
+    edges, failing = find_undeclared_edges(root, tests, sample=sample, seed=seed)
+    for label in failing:
+        print(f"  skipped {label}: fails even unbroken, so it can't be checked")
+    if edges:
+        print("lirk: undeclared dependencies (add each source's target to the "
+              "test's deps, or to the deps of the code that loads it):")
+        for edge in edges:
+            print(f"  {edge.test} -> {' or '.join(edge.owners)}")
+    print(f"lirk: {len(edges)} undeclared dependenc{'y' if len(edges) == 1 else 'ies'} found")
+    print("lirk: OK" if not edges else "lirk: FAILED")
+    return 1 if edges else 0
 
 
 def cmd_verify(
@@ -877,6 +907,11 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     verify_p.add_argument(
         "--seed", type=int, default=None, help="seed for --sample, to reproduce a run"
     )
+    verify_p.add_argument(
+        "--mutate", action="store_true",
+        help="break each library source in turn and rerun the tests that claim "
+             "not to depend on it, to find undeclared dependencies (slow)",
+    )
     verify_p.add_argument("--root", type=Path, default=None, help=root_help)
 
     fix_p = sub.add_parser(
@@ -936,6 +971,8 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     if args.command == "verify":
         if args.sample is not None and args.sample < 1:
             parser.error("--sample must be at least 1")
+        if args.mutate:
+            return cmd_verify_mutate(root, args.labels, sample=args.sample, seed=args.seed)
         return cmd_verify(root, args.labels, sample=args.sample, seed=args.seed)
     return cmd_test(root, args.labels, force=args.force, fail_fast=args.fail_fast)
 

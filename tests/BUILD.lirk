@@ -75,3 +75,9 @@ name = "test_bench"
 type = "test"
 srcs = ["test_bench.py"]
 deps = [":init", "//bench:bench", "//lirk:cli"]
+
+[[target]]
+name = "test_mutate"
+type = "test"
+srcs = ["test_mutate.py"]
+deps = [":init", "//lirk:cli"]
