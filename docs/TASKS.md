@@ -213,11 +213,7 @@ Recorded so they aren't re-derived from the review as if they were new:
 
 ## Documentation gaps
 
-**D2 — Link the filed iSH-AOK issue from `KNOWN_ISSUES.md`.** The
-upstream JVM-crash report has been submitted, and the local draft was
-removed. `KNOWN_ISSUES.md` now says so but has no issue URL, so a
-reader can't get from the investigation to the upstream thread or its
-status. *What's left:* paste the issue link in.
+*None. D2 is closed — see Recently closed.*
 
 ---
 
@@ -338,19 +334,24 @@ stale-PASS path remains open.**
 The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
 2026-08-04), so nothing is queued behind the tag either.
 
-1. **Tag v1.** The only outstanding item. Needs one decision that isn't
-   derivable from the repo: `pyproject.toml` still says `0.1.0`, and
-   tagging v1 means bumping it — `1.0.0` is the obvious reading of "v1",
-   but the criteria never fixed a number, so it is the author's call.
-2. **D2**, whenever convenient — needs the upstream iSH-AOK issue URL,
-   which is likewise not derivable from the repo.
+1. **Create the `v1.0.0` git tag on `main`** once this branch merges.
+   `pyproject.toml` already says `1.0.0` (decided 2026-11-21: the plain
+   reading of "v1"). The tag goes on `main`, not on a feature branch.
+2. **Roadmap v1.x** — R3 (pytest runner) is in progress; then R2
+   (`lirk verify`) and R4 (`lirk fix` / `init`).
 3. **L7**, only if a real repo hits it. **L3**'s remaining half only if
    concurrent runs become a real workflow.
 
-Both remaining items need input from outside the repo. Everything that
-could be done from inside it is done.
-
 ## Recently closed
+
+- **Version set to 1.0.0** (2026-11-21). The criteria never fixed a
+  number; 1.0.0 is the plain reading of "v1". The git tag waits for the
+  merge to `main`.
+- **D2 — upstream iSH-AOK issue linked** (2026-11-21).
+  `KNOWN_ISSUES.md` now links
+  [emkey1/ish-AOK#542](https://github.com/emkey1/ish-AOK/issues/542).
+  Identified by search, not by a recorded URL: same filing date as the
+  local draft (2026-07-28), same title and the same HotSpot error.
 
 - **Codebase review pass** (2026-11-21). Two crashes found by probing
   edges the suite didn't reach, three smaller correctness fixes, and

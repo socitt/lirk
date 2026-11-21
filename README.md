@@ -156,9 +156,10 @@ against. `--root <path>` overrides discovery entirely.
 
 ## Status
 
-Early development, not yet stable. All three v1 criteria below now
-hold; the tag waits on the last high-priority correctness item (H2 in
-[`docs/TASKS.md`](docs/TASKS.md)).
+**1.0.0.** All three v1 criteria below hold and no known stale-PASS
+path is open, so the package version is 1.0.0. Serial execution
+remains the default; see the roadmap in
+[`docs/TASKS.md`](docs/TASKS.md) for what comes next.
 
 **v1 stability criteria.** Serial execution counts as "proven stable"
 (unblocking parallelism work), and lirk is ready to expand scope

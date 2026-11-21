@@ -109,8 +109,8 @@ expanding scope.
 
 ## Status
 
-Early development, not yet stable. Parallelism work and any scope
-expansion are on hold until *all three* v1 criteria hold:
+**1.0.0.** Version 1 was gated on *all three* of these criteria, and
+all three hold:
 
 1. **Self-hosting** — lirk builds and tests its own source through its
    own `BUILD.lirk` files. **Met.** `lirk build //...` builds 13
@@ -128,8 +128,8 @@ expansion are on hold until *all three* v1 criteria hold:
 3. **Known issues clear** — no open entries beyond ones explicitly
    marked cosmetic-only. **Met.**
 
-All three now hold and the high-priority correctness work is done, so
-v1 is ready to tag. The `termrery` trial found that `deps` was not
+All three hold and the high-priority correctness work is done, which
+is what 1.0.0 means. The `termrery` trial found that `deps` was not
 checked against what a target actually imports, so an undeclared import
 both passed and cached a stale green; **that check now exists and fails
 the build** (2026-08-03). Its narrower sibling — a `.py` file that no

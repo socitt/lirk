@@ -142,8 +142,10 @@ flag or package that works around a JVM that crashes on `java
   fully root-caused and fixed, it would not make real Bazel usable
   here, since Bazel's blocker is one layer further down, in the JVM
   itself. An upstream bug report based on this investigation has been
-  **filed against [emkey1/ish-AOK](https://github.com/emkey1/ish-AOK)**;
-  the local draft was removed once submitted.
+  **filed upstream as
+  [emkey1/ish-AOK#542](https://github.com/emkey1/ish-AOK/issues/542)**
+  ("JVM fails to start on aarch64 — HotSpot crashes with 'Field too big
+  for insn'"); the local draft was removed once submitted.
 
 ---
 
