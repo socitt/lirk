@@ -1,5 +1,5 @@
 # lirk's own modules. Deps mirror the real import graph in the sources;
-# see docs/DESIGN.md for why the layering is shaped this way.
+# see docs/dev/DESIGN.md for why the layering is shaped this way.
 #
 # Everything depends on :init transitively, because importing any
 # lirk.<module> executes lirk/__init__.py first -- an edit to it really

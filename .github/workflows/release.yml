@@ -2,7 +2,7 @@
 #
 # Uses PyPI trusted publishing (OIDC): PyPI is configured to trust this
 # exact workflow file in socitt/lirk, so no API token exists anywhere --
-# nothing to leak, rotate or store as a secret. See docs/RELEASING.md.
+# nothing to leak, rotate or store as a secret. See docs/dev/RELEASING.md.
 name: Release
 
 on:

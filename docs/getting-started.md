@@ -5,65 +5,43 @@ title: Getting started
 
 # Getting started
 
-This page takes you from nothing to a working lirk setup, then covers
-adopting lirk in a repo that already exists. Every command and every
-block of output below is a real transcript, not an illustration.
+This walks through a new two-package repo from scratch: write the code,
+declare the targets, run the tests, and watch lirk skip everything that
+didn't change. It takes about five minutes. If you already have a repo,
+skip to [Existing repos](adopting.html), where `lirk init` writes the
+BUILD files for you.
 
-For the target schema in full, see
-[BUILD.lirk format](https://socitt.github.io/lirk/build-format.html).
-For what lirk does internally and why, see
-[How it works](https://socitt.github.io/lirk/how-it-works.html).
+## Install
 
-## Requirements
-
-Python 3.11 or newer. Nothing else — lirk has no third-party
-dependencies.
+lirk needs Python 3.11 or newer, and nothing else.
 
 ```sh
 pip install lirk
+lirk --version
 ```
 
-That puts a `lirk` console script on your `PATH`. To check:
+## 1. Mark the repo root
 
-```sh
-lirk build --help
-```
-
----
-
-## Part 1 — a worked example from zero
-
-We'll build a two-package repo where one package depends on the other.
-Start with an empty directory.
-
-### 1. Mark the repo root
+From an empty directory:
 
 ```sh
 touch .lirk-root
 ```
 
-lirk resolves `//`-prefixed labels relative to the repo root, and finds
-that root by walking up from your current directory looking for this
-marker. **Create it before anything else.** Without it lirk silently
-treats whatever directory you happen to be standing in as the root,
-which produces confusing "does not exist" errors rather than an honest
-"you're in the wrong place" — see [Troubleshooting](#troubleshooting).
+Labels like `//app:app` are resolved from the repo root, and lirk finds
+the root by looking for this file in the current directory and its
+parents. It can stay empty.
 
-The file can stay empty. Later it can also carry an `ignore` list; see
-[Part 2](#excluding-directories-that-arent-yours).
-
-### 2. Write the source files
+## 2. Write some code
 
 ```
 .lirk-root
 greeting/
     greet.py
     test_greet.py
-    BUILD.lirk
 app/
     cli.py
     test_cli.py
-    BUILD.lirk
 ```
 
 `greeting/greet.py`:
@@ -86,7 +64,7 @@ class GreetTest(unittest.TestCase):
         self.assertEqual(greet("world"), "Hello, world!")
 ```
 
-`app/cli.py`, which depends on the other package:
+`app/cli.py` uses the other package:
 
 ```python
 from greeting.greet import greet
@@ -109,13 +87,13 @@ class BannerTest(unittest.TestCase):
         self.assertEqual(banner("world"), "HELLO, WORLD!")
 ```
 
-Plain `unittest`. lirk imposes no test framework of its own and needs
-no `if __name__ == "__main__"` block — it runs each src through
-`python3 -m unittest`.
+These are ordinary `unittest` tests. pytest works just as well; see
+[Using pytest](adopting.html#using-pytest).
 
-### 3. Declare the targets
+## 3. Declare the targets
 
-One `BUILD.lirk` per package directory. `greeting/BUILD.lirk`:
+Each package directory gets a `BUILD.lirk` listing its targets.
+`greeting/BUILD.lirk`:
 
 ```toml
 [[target]]
@@ -146,40 +124,30 @@ srcs = ["test_cli.py"]
 deps = [":app"]
 ```
 
-Two label forms appear here: `:greeting` for a sibling in the same
-package, and `//greeting:greeting` for a target in another one. A
-target's `name` need not match its package or its filenames — `app`
-and `app_test` both live in package `app`, so their labels are
-`//app:app` and `//app:app_test`.
+A `library` is code other targets can depend on, and a `test` is code
+lirk runs. `deps` names what a target uses: `:greeting` for a target in
+the same package, `//greeting:greeting` for one in another package.
 
-### 4. Build and test
+> You don't have to write the `deps` lines yourself. Leave them out,
+> run `lirk fix`, and lirk adds them from your imports.
 
-`build` validates: every declared file exists, and every src parses as
-Python. There is no compilation and no artifact output.
-
-```
-$ lirk build //...
-  built  //greeting:greeting
-  built  //app:app
-  built  //app:app_test
-  built  //greeting:greeting_test
-lirk: 4 built, 0 cached, 0 failed, 0 skipped
-lirk: OK
-```
-
-`test` runs the test targets, building their dependencies first:
+## 4. Run the tests
 
 ```
 $ lirk test //...
   built  //greeting:greeting
   built  //app:app
-  PASS   //app:app_test
-  PASS   //greeting:greeting_test
+  PASS   //app:app_test (0.1s)
+  PASS   //greeting:greeting_test (0.1s)
 lirk: 2/2 tests passed
 lirk: OK
 ```
 
-Run it again and nothing re-runs — every fingerprint still matches:
+`//...` means every target in the repo. lirk checks each library
+first (its files exist, it parses, and its imports match its `deps`),
+then runs the tests.
+
+Run it again:
 
 ```
 $ lirk test //...
@@ -191,28 +159,35 @@ lirk: 2/2 tests passed
 lirk: OK
 ```
 
-### 5. Watch a change propagate
+Nothing changed, so nothing ran.
 
-Append a function to `greeting/greet.py` and re-run. Note that
-`//app:app` rebuilds too, even though nothing in `app/` was touched —
-it depends on `//greeting:greeting`, and a dependency's fingerprint is
-folded into its dependents':
+## 5. Change something
+
+Edit `greeting/greet.py`, for example by adding a function, and run
+again:
 
 ```
 $ lirk test //...
   built  //greeting:greeting
   built  //app:app
-  PASS   //app:app_test
-  PASS   //greeting:greeting_test
+  PASS   //app:app_test (0.1s)
+  PASS   //greeting:greeting_test (0.1s)
 lirk: 2/2 tests passed
 lirk: OK
 ```
 
-Invalidation is by **file content**, not timestamp. `touch` changes
-nothing; a fresh clone doesn't rebuild the world; reverting an edit
-returns you to the cached result.
+Both tests ran. `app` didn't change, but it depends on `greeting`, so
+its result can no longer be trusted. Now edit only `app/cli.py`: this
+time `greeting`'s test stays `cached`, because nothing it depends on
+changed.
 
-### 6. Gitignore lirk's artifacts
+lirk compares file contents, not timestamps. Touching a file, switching
+branches and back, or making a fresh clone doesn't cause reruns. Undo an
+edit and you're back to the cached result.
+
+## 6. Ignore lirk's cache in git
+
+Add to `.gitignore`:
 
 ```
 .lirk-cache.json
@@ -221,470 +196,16 @@ __pycache__/
 *.pyc
 ```
 
-`.lirk-cache.json` lives at the repo root and is purely local state.
-Don't commit it and don't share it between machines.
-
-That's the whole workflow.
-
----
-
-## Part 2 — adopting lirk in an existing repo
-
-### The fast path: `lirk init`
-
-From your repo's top level:
-
-```
-$ lirk init
-  created app/BUILD.lirk: library :app (1 srcs); test :app_test (1 srcs, unittest)
-  created lib/BUILD.lirk: library :lib (2 srcs)
-  deps   //app:app: //lib:lib
-  deps   //app:app_test: :app
-lirk: drafted 2 BUILD.lirk file(s), 3 target(s); 0 need a hand fix
-$ lirk test //...
-```
-
-`init` drafts one `library` per directory of Python files and one
-`test` target for its `test_*.py` / `*_test.py` files, choosing
-`runner = "pytest"` for plain-function test files. It then derives
-**every** dep from what the code actually imports, using the same
-planner as `lirk fix`. Nothing about the graph is guessed. It creates
-an empty `.lirk-root` if there isn't one, never touches a directory
-that already has a `BUILD.lirk` (so it's safe to re-run after adding a
-package), and skips virtualenvs, `build/`, `dist/`, dot-directories and
-anything in `.lirk-root`'s `ignore` list. `--dry-run` lists what it
-would create.
-
-What it can't know, and you should check:
-
-- **Files read at runtime** (fixtures, templates, golden output) need
-  declaring as `data`. Nothing imports them, so no tool can see them.
-  `lirk verify` catches the ones you miss.
-- **`MANUAL` lines**: an import of a file two targets would own, or
-  packages importing each other (a cycle). Both need a decision only you
-  can make.
-- **Target boundaries**: one library per directory is a starting point.
-  Split or merge targets freely afterwards.
-
-The sections below explain the model `init` follows. Read them before
-reshaping its output, or if you'd rather convert by hand. Each covers a
-place a real repo tends to stumble.
-
-### Deciding what a package is
-
-A **package** is any directory with a `BUILD.lirk` in it. Packages
-don't nest meaningfully — a `BUILD.lirk` describes the files in its own
-directory, and every path inside it (`srcs`, `data`) is relative to
-that directory.
-
-Start coarse: one `library` target per directory holding the `.py`
-files that belong together, plus one `test` target per directory
-holding its test files. Split further only when you want finer
-invalidation, since a target is the unit of caching — a 20-src library
-re-validates in full when any one of the 20 changes.
-
-`srcs` may name a file in a subdirectory (`sub/helper.py`), so a
-package need not be flat. Test srcs in subdirectories run as their
-dotted module path and need no `__init__.py`.
-
-### Getting the imports right
-
-This is where real repos actually stumble. Each test src is run with:
-
-- **`cwd` set to the package directory**, so the package directory is
-  `sys.path[0]`, and
-- **the repo root prepended to `PYTHONPATH`**.
-
-Two import styles therefore work, and you can mix them:
-
-```python
-from greet import greet                # sibling in the same package
-from greeting.greet import greet       # root-relative, any package
-```
-
-Root-relative is the convention Bazel and Please encourage, and it's
-what makes cross-package imports work at all.
-
-**Every cross-package import must be in `deps`.** lirk checks the two
-against each other and fails the build when they disagree:
-
-```
-  FAIL   //cli:cli: render.py imports 'orrery.camera' (//orrery:orrery), not in deps
-```
-
-Add `//orrery:orrery` to that target's `deps` and it passes. This is
-the one check that costs you something during migration, so it's worth
-knowing why it isn't optional: because the repo root is importable, an
-undeclared import *works* — and because only declared deps are
-fingerprinted, editing the package you forgot to declare invalidates
-nothing. You get a `cached` PASS against changed code. Declaring the
-edge is what makes the cache trustworthy.
-
-A dep-of-a-dep counts, so you don't have to list every package you
-reach transitively. The stdlib and installed packages are ignored —
-anything outside your repo isn't lirk's business.
-
-**Importing a file of your own that no target declares fails too**, for
-the same reason and with a different message:
-
-```
-  FAIL   //leaf:orphan_user: orphan_user.py imports 'orphan.thing' -- no target declares orphan/thing.py
-```
-
-Nothing fingerprints a file no target lists, so editing it invalidates
-nothing — the same stale `cached` PASS, with no target to name. The fix
-is to put the file in some target's `srcs` and depend on that target.
-Watch for `__init__.py` here: `from pkg import thing` imports `pkg`
-itself as well, so a non-empty `pkg/__init__.py` needs declaring. If
-you have no `__init__.py` at all, nothing changes — lirk resolves
-subdirectories as namespace packages (PEP 420).
-
-**The one trap: don't give a module the same name as its own package
-directory.** A file `greeting/greeting.py` shadows the package
-`greeting` whenever a test in that same directory runs, because the
-package directory is searched first:
-
-```
-ModuleNotFoundError: No module named 'greeting.greeting'; 'greeting' is not a package
-```
-
-The fix is a rename, not a lirk setting. This bites only inside the
-directory that owns the colliding name — the same import from another
-package resolves fine, which is what makes it confusing when it hits.
-
-### Declaring non-Python inputs as `data`
-
-Anything a target reads at runtime but which isn't Python — a fixture
-file, a testdata tree, a golden file — belongs in `data`, not `srcs`.
-`data` entries are fingerprinted exactly like srcs but never parsed:
-
-```toml
-[[target]]
-name = "parser_test"
-type = "test"
-srcs = ["test_parser.py"]
-deps = [":parser"]
-data = ["testdata"]
-```
-
-Getting this wrong fails in two directions. A non-`.py` file in `srcs`
-is rejected outright, before anything is built:
-
-```
-lirk: greeting/BUILD.lirk (target #1): src 'fixture.txt' is not a .py file -- every src is parsed as Python; declare fixtures and other non-source inputs as 'data' instead
-```
-
-Leaving it undeclared entirely is worse and silent: edits to it never
-invalidate anything, so you get a cached PASS against inputs that
-changed. A `data` entry may name a **directory**, fingerprinted
-recursively — prefer that over listing files by hand, which goes stale
-the first time someone adds a file and forgets.
-
-### Covering your entry point
-
-lirk has no `binary` target type and no `lirk run` — deliberately. A
-`test` target that subprocesses your entry point covers the same
-ground, and this is the pattern that replaces them, so it's worth
-writing early.
-
-Without it, nothing checks that your application starts at all. A real
-project shipped a `main()` that was defined and never called: `python3
--m cli.render` did nothing whatsoever, while `lirk build //...`
-reported OK throughout. Every library was fine; the one artifact the
-repo existed to produce was the one thing lirk had no opinion about.
-
-Give the entry point a self-test path:
-
-```python
-# cli/render.py
-def main(argv=None):
-    ...
-
-if __name__ == "__main__":
-    import sys
-    if "--selftest" in sys.argv:
-        print("render: ok")
-        raise SystemExit(0)
-    raise SystemExit(main())
-```
-
-and a test target that runs the real thing as a subprocess:
-
-```python
-# cli/test_render.py
-import subprocess
-import sys
-import unittest
-
-
-class EntryPointTest(unittest.TestCase):
-    def test_entry_point_starts_exits_clean_and_prints(self):
-        proc = subprocess.run(
-            [sys.executable, "-m", "cli.render", "--selftest"],
-            capture_output=True, text=True, timeout=30,
-        )
-
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertTrue(proc.stdout.strip(), "entry point produced no output")
-```
-
-```toml
-[[target]]
-name = "render_test"
-type = "test"
-srcs = ["test_render.py"]
-deps = [":render"]
-```
-
-Assert all three things — that it starts, that it exits 0, and that it
-produced output. Exit code alone passes for a program whose `main()` is
-never called, which is exactly the failure this is for.
-
-`python3 -m cli.render` resolves because lirk puts your repo root on
-`PYTHONPATH` (see [Getting the imports right](#getting-the-imports-right)),
-so the subprocess finds the package the same way your tests do. Keep
-the `timeout=` — lirk's own test timeout can only kill its direct
-child, so a wedged grandchild is yours to bound.
-
-### Using pytest
-
-If your tests are written for pytest, add `runner = "pytest"` to each
-`test` target. Fixtures, `assert` rewriting and `conftest.py` all work
-as usual, because lirk simply runs `python3 -m pytest <src>` once per
-src. pytest has to be installed for the same interpreter that runs
-lirk.
-
-Two things differ from running pytest yourself:
-
-- **conftest and config files count as inputs.** Every `conftest.py`
-  and pytest config file between the package and the repo root goes
-  into the target's fingerprint, so editing one re-runs the tests
-  rather than leaving a stale `cached`. A conftest's imports also need
-  `deps`, just like a src's: if your root `conftest.py` does `from app
-  import factory`, every pytest target under it needs `//app:app`.
-- **No `.pytest_cache`.** lirk passes `-p no:cacheprovider`, so
-  `--lf`-style state isn't written into your source tree. lirk's own
-  cache already skips anything that passed.
-
-### Excluding directories that aren't yours
-
-Directories starting with `.` are skipped automatically. For anything
-else that contains `BUILD.lirk` files which aren't your targets — a
-vendored dependency, a nested checkout, a fixture tree — list it in
-`.lirk-root`, which doubles as repo config:
-
-```toml
-ignore = ["tests/fixtures", "vendor"]
-```
-
-Paths are relative to the repo root, and each entry excludes the
-directory and everything under it.
-
-### Verifying the migration honestly
-
-Run your existing test command and `lirk test //...`, and confirm they
-agree on what passes. Keep the existing runner around at least through
-the trial; lirk's own repo runs both permanently, on the grounds that
-an independent runner is the only thing that would catch lirk
-reporting a false green about itself.
-
----
-
-## Command reference
-
-The CLI's subcommands:
-
-| Command | Effect |
-|---|---|
-| `lirk build <label>...` | Check every declared file exists, every src parses as Python, and every cross-package import is declared in `deps`, for the targets and their transitive deps. |
-| `lirk test <label>...` | Run each test src via `python3 -m unittest`, after building its deps. |
-| `lirk verify [label...]` | Re-run every currently-cached result in scope (default `//...`) with the cache bypassed, and fail on any that no longer passes. `--sample N` checks a random N instead; `--seed` reproduces a sample. A disagreement prints `STALE`, and that cache entry is deleted. |
-| `lirk init` | Draft a `BUILD.lirk` for every directory of Python files that has none, then add the deps their imports call for. Creates `.lirk-root` if missing. `--dry-run` lists the files without writing them. |
-| `lirk fix [label...]` | Add the `deps` entries the import check reports as missing (default scope `//...`), editing BUILD files in place with comments preserved. Anything ambiguous, or that would create a cycle, is listed as `MANUAL` instead. `--dry-run` shows the edits without making them. Exit 0 only when nothing needs a hand fix. |
-| `lirk clean` | Delete `.lirk-cache.json` (and any temp file an interrupted run left beside it). The next run redoes everything. |
-
-| Flag | Applies to | Effect |
-|---|---|---|
-| `--force` | both | Ignore cached results and re-do everything in scope. Doesn't delete the cache file. |
-| `--rebuild` | `build` | Alias for `--force`. |
-| `--rerun` | `test` | Alias for `--force`. |
-| `--root <path>` | all three | Use this repo root, overriding `.lirk-root` discovery entirely. |
-| `--version` | neither | Print the installed version and exit. Takes no subcommand. |
-
-Labels:
-
-| Form | Meaning |
-|---|---|
-| `//pkg:name` | One target in package `pkg`. |
-| `//:name` | A target in the root package. |
-| `:name` | A sibling target — **valid inside `deps` only**, not on the command line. |
-| `//pkg:all` | Every target in package `pkg` (`//:all` for the root package). A target actually named `all` takes precedence. |
-| `//pkg/...` | Every target in `pkg` and in every package beneath it. `//app/...` does not reach `//apps`. |
-| `//...` | Every target in the repo. |
-
-Several labels can be given at once — `lirk test //app/... //lib:lib_test`
-runs the union. Under `lirk test`, a wildcard quietly narrows to the
-`test` targets it covers (and finding none is not an error), while an
-explicitly named non-test target is still an error. A wildcard that
-matches no targets at all fails with `pattern //nope/... matches no
-targets`, since that is nearly always a typo.
-
-## Reading the output
-
-One line per target, in dependency order:
-
-| Line | Meaning |
-|---|---|
-| `built  <label>` | Validated (or re-validated) just now. |
-| `PASS   <label> (2.4s)` | Test target ran, all srcs passed, in that much wall-clock time. Test lines always carry a duration; `built` lines only when validation took over a second. |
-| `cached <label>` | Fingerprint unchanged since the last success; nothing ran. |
-| `FAIL   <label>: <reason>` | Failed, with the raw test output printed beneath. |
-| `SKIP   <label>: dependency <dep> failed` | Not attempted, because something it depends on failed. |
-
-When a run's tests took 10 seconds or more in total, the three slowest
-test targets are listed just above the summary — the quickest way to
-choose a `timeout` or spot a test worth splitting:
-
-```
-lirk: slowest (of 1m12s in tests):
-   48.2s  //evolve:train_smoke_test
-   15.1s  //physics:orbit_test
-    4.0s  //chaos:lyapunov_test
-```
-
-If anything failed, the labels that failed are listed again just above
-the summary, so you don't have to scroll back through a traceback to
-find one you already saw:
-
-```
-lirk: failed:
-  //greeting:greeting_test
-lirk: 0/1 tests passed
-lirk: FAILED
-```
-
-`SKIP`ped targets are not in that list — they're consequences of
-someone else's failure, and the label worth acting on is the one that
-actually broke.
-
-Then a summary and `lirk: OK` or `lirk: FAILED`. Exit status is **0**
-on OK, **1** on any failure or usage error.
-
-Two behaviours worth knowing up front:
-
-- **Only successes are cached.** A failure is always retried next run,
-  even if nothing changed.
-- **Changing your Python environment reruns everything once.**
-  Upgrading Python, or installing, upgrading or removing any package,
-  changes every target's fingerprint, since a test that passed against
-  the old versions may not pass against the new ones.
-- **`SKIP` is not a pass.** A target whose dependency failed is never
-  run and never counted as passing, so a broken library can't produce a
-  green test run beneath it.
-
-Test output is passed through raw — lirk never summarizes or reformats
-what `unittest` printed.
-
-## Troubleshooting
-
-**`lirk: //:app: dependency '//greeting:greeting' does not exist`, and
-the target obviously does exist.** You're in a subdirectory and there's
-no `.lirk-root` above you, so lirk took the subdirectory as the repo
-root and can't see anything outside it. Check the `lirk: repo root is
-...` line printed just beneath the error — if it isn't your real root,
-that's the whole problem. Create the marker at your real root, or pass
-`--root`.
-
-**`lirk: no .lirk-root found in any parent directory; using the current
-directory as the repo root: ...`.** Not an error — lirk is telling you
-what `//` means for this run. If the named directory is your repo root,
-create an empty `.lirk-root` there and the note goes away. If it isn't,
-every `//` label in this run meant the wrong thing.
-
-**`lirk: malformed label '//app'`.** A label needs both parts —
-`//package:name`. You probably meant `//app:app`, `//app:all` (every
-target in the package) or `//app/...` (that package and everything
-beneath it).
-
-**`lirk: invalid label ':app': command-line labels must be absolute`.**
-`:name` works inside `deps` only. On the command line, spell out
-`//package:name`.
-
-**`lirk: circular dependency: //app:app -> //greeting:greeting ->
-//app:app`.** The full cycle path is in the message; break any edge in
-it.
-
-**`lirk: <file> (target #2): unknown key(s): dpes`.** A typo'd or
-unsupported key in a `[[target]]` table. Rejected deliberately: a
-transposed `dpes` would otherwise silently produce a target with no
-dependency edges, which then never invalidates when its real
-dependency changes.
-
-**`FAIL ...: missing source file(s): greet.py`.** A declared src or
-data path doesn't exist. Only that target fails; unrelated targets
-still build, and its dependents report `SKIP`.
-
-**`FAIL //cli:cli: render.py imports 'orrery.camera' (//orrery:orrery),
-not in deps`.** A src imports a module belonging to a target this one
-doesn't depend on, directly or transitively. Run `lirk fix` to add it,
-or add the named label to that target's `deps` yourself. If the import is genuinely wrong, delete it
-instead — but don't reach for a workaround: the check exists because an
-undeclared import silently escapes the fingerprint. See [Getting the
-imports right](#getting-the-imports-right).
-
-**`FAIL ...: orphan_user.py imports 'orphan.thing' -- no target
-declares orphan/thing.py`.** Same problem, one step further out: the
-imported file belongs to no target at all, so there is no label to add
-to `deps`. Declare the file in some target's `srcs` and depend on that
-target. Most often this is an `__init__.py` nobody listed.
-
-**`lirk: <file> (target #1): src 'fixture.txt' is not a .py file`.**
-A non-Python file is in `srcs`. Every src is parsed as Python, so this
-is rejected as soon as the BUILD file is read. Move it to `data`. (A
-file that is *named* `.py` but isn't Python fails later, at build time,
-as "not readable as Python source".)
-
-**`FAIL ...: 1 of 2 src files failed: test_empty -- contained no
-tests: test_empty`.** A src in a `test` target defined no tests. That's
-a failure, not a pass — a file that tests nothing is nearly always a
-mistake (a bad rename, a lost import) rather than an intention.
-
-**`ModuleNotFoundError: No module named 'greeting.greeting'; 'greeting'
-is not a package`.** A module named the same as its own package
-directory. See [Getting the imports
-right](#getting-the-imports-right).
-
-**`lirk: //greeting:greeting is type 'library', not 'test'`.** `lirk
-test` needs a `test` target. Use `lirk build` for a library, or
-`//...` to run everything.
-
-**A test hangs.** Test subprocesses get `stdin` connected to
-`/dev/null`, so a test reading stdin fails fast rather than silently
-eating your keystrokes. There's also a per-src timeout: 600 seconds by
-default, or set `timeout = <seconds>` on the `test` target to fail a
-wedged test much sooner. Only the direct child is killed — a process
-the test itself spawned can outlive it (lirk deliberately creates no
-process groups).
-
-## If you're trialling lirk
-
-lirk's [v1 stability
-criteria](https://github.com/socitt/lirk/blob/main/docs/TASKS.md)
-require a track record across at least three distinct real repos, and
-what makes a trial useful is evidence rather than an impression. If
-you're willing, keep a note of:
-
-- **Roughly how many `lirk build` / `lirk test` invocations** you ran.
-- **Any `signal: hangup`**, or any other failure that isn't your code's
-  fault. This is the exact failure mode lirk was built to avoid, and
-  it has never been observed — a single occurrence is a significant
-  finding.
-- **Any cache-correctness disagreement:** a `cached` result that
-  differs from what a fresh run produces on the same tree. `lirk
-  verify` checks exactly this, so run it occasionally (`lirk verify
-  --sample 5` is cheap) and record any `STALE` line. One such bug has
-  been found so far (an undeclared fixture directory producing a stale
-  PASS), and it was found exactly this way.
-- **Anything in this guide that turned out to be wrong or missing.**
-
-Issues and observations: <https://github.com/socitt/lirk/issues>.
+`.lirk-cache.json` is lirk's record of what passed. It's local to your
+machine, so don't commit it.
+
+## What next
+
+- **Run part of the repo:** `lirk test //app/...` (a package and
+  everything under it), or `lirk test //app:app_test` (one target).
+  [Commands](commands.html) has every form.
+- **Read fixture files in a test?** Declare them as `data`, or edits to
+  them won't trigger reruns. See [BUILD files](build-format.html).
+- **Converting a real repo?** Read [Existing repos](adopting.html).
+- **Curious why you can trust `cached`?** Read
+  [How it works](how-it-works.html).

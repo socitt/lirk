@@ -18,7 +18,7 @@ answer rather than an open theory.
 
 lirk's README already explains that lirk exists because of an
 unresolved `signal: hangup` bug in Please (a Bazel-alike) on this
-device — see "Why this exists" in [README.md](../README.md). That
+device — see "Why this exists" in [README.md](../../README.md). That
 investigation left open a natural follow-up question: could real
 Bazel itself be used instead of a Please-alike at all? This entry
 answers that question directly: no, and the reason is unrelated to

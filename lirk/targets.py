@@ -1,6 +1,6 @@
 """Parsing of BUILD.lirk target-declaration files (TOML syntax).
 
-See docs/build-format.md for the schema, and docs/DESIGN.md for the
+See docs/build-format.md (published as the "BUILD files" page) for the schema, and docs/dev/DESIGN.md for the
 target model and the format tradeoff behind choosing TOML.
 """
 
