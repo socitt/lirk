@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,6 +39,12 @@ from lirk.graph import Graph, GraphError, build_graph, topological_sort, transit
 from lirk.targets import ROOT_MARKER, ConfigError
 
 ALL_TARGETS = "//..."
+# A run whose tests took at least this long in total ends by naming its
+# slowest ones. Below it the list would be noise on a short run.
+SLOWEST_REPORT_THRESHOLD = 10.0
+SLOWEST_REPORT_COUNT = 3
+# Validation is normally instant; only a slow one is worth a duration.
+SLOW_BUILD_SECONDS = 1.0
 RECURSIVE_SUFFIX = "/..."
 PACKAGE_WILDCARD = "all"
 
@@ -158,6 +165,8 @@ class ExecutionSummary:
     # dependents are deliberately not in here: they are consequences,
     # and listing them buries the labels worth acting on.
     failures: list[str] = field(default_factory=list)
+    # (label, seconds) for every test target actually run this time.
+    test_durations: list[tuple[str, float]] = field(default_factory=list)
 
     @property
     def tests_total(self) -> int:
@@ -272,16 +281,27 @@ def _execute(
 
         env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}))
 
+        started = time.monotonic()
         if is_test:
             result = run_test(target, root, env)
             verb = "PASS" if result.ok else "FAIL"
         else:
             result = validate_target(target, root, env)
             verb = "built" if result.ok else "FAIL"
+        elapsed = time.monotonic() - started
+        # Wall-clock from a monotonic clock: iSH-AOK's CPU-time accounting
+        # is known to be unreliable (DESIGN.md §4), and wall time is what
+        # the person waiting actually experiences.
+        timing = ""
+        if is_test:
+            summary.test_durations.append((label, elapsed))
+            timing = f" ({_format_duration(elapsed)})"
+        elif elapsed >= SLOW_BUILD_SECONDS:
+            timing = f" ({_format_duration(elapsed)})"
 
         if result.ok:
             cache[cache_key] = fp
-            print(f"  {verb:6} {label}", flush=True)
+            print(f"  {verb:6} {label}{timing}", flush=True)
             if is_test:
                 summary.tests_passed += 1
             else:
@@ -297,13 +317,37 @@ def _execute(
             summary.failures.append(label)
             if is_test:
                 summary.tests_failed += 1
-            print(f"  {verb:6} {label}: {result.message}", flush=True)
+            print(f"  {verb:6} {label}{timing}: {result.message}", flush=True)
             for stream in (result.stdout, result.stderr):
                 if stream.strip():
                     print(stream.rstrip(), flush=True)
 
     save_cache(cache_path, cache)
     return ok, summary
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes, secs = divmod(int(round(seconds)), 60)
+    return f"{minutes}m{secs:02d}s"
+
+
+def _print_slowest(summary: ExecutionSummary) -> None:
+    """Name the slowest test targets of a run that took a while.
+
+    The single most useful fact for choosing a `timeout`, or deciding
+    what to split, and otherwise only recoverable by scrolling back
+    through every line. Like _print_failures, it restates what lirk
+    measured itself and touches nothing about captured output.
+    """
+    total = sum(seconds for _, seconds in summary.test_durations)
+    if total < SLOWEST_REPORT_THRESHOLD or len(summary.test_durations) < 2:
+        return
+    slowest = sorted(summary.test_durations, key=lambda d: d[1], reverse=True)
+    print(f"lirk: slowest (of {_format_duration(total)} in tests):")
+    for label, seconds in slowest[:SLOWEST_REPORT_COUNT]:
+        print(f"  {_format_duration(seconds):>6}  {label}")
 
 
 def _print_failures(summary: ExecutionSummary) -> None:
@@ -377,6 +421,7 @@ def cmd_test(root: Path, labels: list[str], force: bool = False) -> int:
     subset_order = [l for l in order if l in closure]
 
     ok, summary = _execute(root, graph, subset_order, mode="test", force=force)
+    _print_slowest(summary)
     _print_failures(summary)
     passed = summary.tests_passed + summary.tests_cached
     print(f"lirk: {passed}/{summary.tests_total} tests passed")

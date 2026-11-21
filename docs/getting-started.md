@@ -498,10 +498,21 @@ One line per target, in dependency order:
 | Line | Meaning |
 |---|---|
 | `built  <label>` | Validated (or re-validated) just now. |
-| `PASS   <label>` | Test target ran, all srcs passed. |
+| `PASS   <label> (2.4s)` | Test target ran, all srcs passed, in that much wall-clock time. Test lines always carry a duration; `built` lines only when validation took over a second. |
 | `cached <label>` | Fingerprint unchanged since the last success; nothing ran. |
 | `FAIL   <label>: <reason>` | Failed, with the raw test output printed beneath. |
 | `SKIP   <label>: dependency <dep> failed` | Not attempted, because something it depends on failed. |
+
+When a run's tests took 10 seconds or more in total, the three slowest
+test targets are listed just above the summary — the quickest way to
+choose a `timeout` or spot a test worth splitting:
+
+```
+lirk: slowest (of 1m12s in tests):
+   48.2s  //evolve:train_smoke_test
+   15.1s  //physics:orbit_test
+    4.0s  //chaos:lyapunov_test
+```
 
 If anything failed, the labels that failed are listed again just above
 the summary, so you don't have to scroll back through a traceback to

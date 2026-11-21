@@ -294,7 +294,9 @@ for effort.
   `unittest discover` and `python3 -m lirk test //...` would catch a
   3.11-only break, like the `Ran 0 tests` exit-code difference L1 had
   to work around.
-- [ ] **F2 — Per-target durations in the output.** e.g. `PASS
+- [x] **F2 — Per-target durations in the output.** Done 2026-11-21:
+  test lines always, `built` lines over 1s, and a "slowest" list when a
+  run's tests total 10s or more. e.g. `PASS
   //a:a_test (12.4s)`. Cheap (one `time.monotonic()` around the
   existing call), and it is the data you need to choose a sensible
   `timeout` and to find the slow target in a suite.

@@ -7,7 +7,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lirk.cli import _discover_root, main
+from lirk.cli import (
+    ExecutionSummary,
+    _discover_root,
+    _format_duration,
+    _print_slowest,
+    main,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -917,6 +923,63 @@ class VerifyCommandTests(unittest.TestCase):
         code, out = _run(["test", "//story:story_test"], self.root)
         self.assertEqual(code, 1)
         self.assertIn("FAIL   //story:story_test", out)
+
+
+class TimingTests(unittest.TestCase):
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def test_test_lines_carry_a_duration_and_build_lines_do_not(self):
+        _, out = _run(["test", "//..."], self.root)
+        self.assertRegex(out, r"  PASS   //a:a_test \(\d+\.\ds\)\n")
+        self.assertRegex(out, r"  built  //c:c_lib\n")
+
+    def test_cached_lines_carry_no_duration(self):
+        _run(["test", "//..."], self.root)
+        _, out = _run(["test", "//..."], self.root)
+        self.assertRegex(out, r"  cached  //a:a_test\n")
+
+    def test_a_failing_test_line_carries_its_duration_before_the_reason(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        shutil.copytree(FIXTURES / "failing_test_repo", root, dirs_exist_ok=True)
+        _, out = _run(["test", "//..."], root)
+        self.assertRegex(out, r"  FAIL   //a:\w+ \(\d+\.\ds\): ")
+
+    def test_format_duration(self):
+        self.assertEqual(_format_duration(0.04), "0.0s")
+        self.assertEqual(_format_duration(12.34), "12.3s")
+        self.assertEqual(_format_duration(65.2), "1m05s")
+        self.assertEqual(_format_duration(600), "10m00s")
+
+    def _slowest(self, durations):
+        summary = ExecutionSummary(test_durations=durations)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _print_slowest(summary)
+        return out.getvalue()
+
+    def test_slowest_lists_the_top_three_longest_first(self):
+        out = self._slowest(
+            [("//a:t", 2.0), ("//b:t", 30.0), ("//c:t", 0.5), ("//d:t", 9.0)]
+        )
+        self.assertEqual(
+            out,
+            "lirk: slowest (of 41.5s in tests):\n"
+            "   30.0s  //b:t\n"
+            "    9.0s  //d:t\n"
+            "    2.0s  //a:t\n",
+        )
+
+    def test_slowest_is_silent_for_a_quick_run(self):
+        self.assertEqual(self._slowest([("//a:t", 1.0), ("//b:t", 2.0)]), "")
+
+    def test_slowest_is_silent_for_a_single_test(self):
+        # One test's duration is already on its own line.
+        self.assertEqual(self._slowest([("//a:t", 99.0)]), "")
 
 
 if __name__ == "__main__":
