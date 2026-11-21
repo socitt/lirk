@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-11-21): 207 tests, `python3 -m
+Last verified against source (2026-11-21): 214 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
 `lirk build //...` (13 targets) and `lirk test //...` (5 test targets)
 — which runs alongside the unittest invocation rather than replacing
@@ -230,7 +230,7 @@ does). Python-only, `library`/`test`-only stays the scope.
 | Milestone | Theme | Contents |
 |---|---|---|
 | **v1.0** | Tag it | Version decision, PyPI (F9), CI matrix (F1) |
-| **v1.x** | Trust and adoption | ~~Environment fingerprinting~~ (done), ~~pytest runner~~ (done), `lirk verify`, `lirk fix` / `lirk init` |
+| **v1.x** | Trust and adoption | ~~Environment fingerprinting~~, ~~pytest runner~~, ~~`lirk verify`~~ (all done), `lirk fix` / `lirk init` |
 | **v1.y** | Speed without parallelism | `--changed`, per-target timings (F2), `--fail-fast` (F4), repo-wide timeout (F3) |
 | **v2** | Teams | JSON / JUnit-XML output, a GitHub Action; opt-in `-j` only with evidence |
 
@@ -238,11 +238,10 @@ does). Python-only, `library`/`test`-only stays the scope.
   the interpreter version and installed distributions are folded into
   every fingerprint (DESIGN §4). Closed a real stale-PASS path: upgrading
   Python or a package left everything `cached`.
-- [ ] **R2 — `lirk verify`.** Re-run a random sample of `cached`
-  targets with the cache bypassed, and fail if any disagree with their
-  cached result. Turns criterion 2's "zero cache-correctness bugs" from
-  a reported number into a measured one, and gives adopters a cheap
-  periodic check.
+- [x] **R2 — `lirk verify`.** Done 2026-11-21. Re-runs every valid
+  cache entry in scope (or `--sample N`, seeded), reports any that now
+  fail as `STALE`, evicts them, and exits 1. On lirk itself: 12 cached
+  results verified, 0 stale. DESIGN §4.
 - [x] **R3 — pytest runner.** Done 2026-11-21: `runner = "pytest"`,
   one `subprocess.run()` per src, exit 5 detected as "no tests".
   conftest and pytest config files from the package up to the root are
@@ -335,11 +334,12 @@ stale-PASS path remains open.**
 The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
 2026-08-04), so nothing is queued behind the tag either.
 
-1. **Create the `v1.0.0` git tag on `main`** once this branch merges.
+1. **Create the `v1.0.0` git tag on `main`.** The release work merged
+   (PR #1, 2026-11-21); the tag push itself was left to the author.
    `pyproject.toml` already says `1.0.0` (decided 2026-11-21: the plain
    reading of "v1"). The tag goes on `main`, not on a feature branch.
-2. **Roadmap v1.x** — R2 (`lirk verify`), then R4 (`lirk fix` /
-   `init`). R1 and R3 are done.
+2. **Roadmap v1.x** — R4 (`lirk fix` / `init`) is what remains. R1,
+   R2 and R3 are done.
 3. **L7**, only if a real repo hits it. **L3**'s remaining half only if
    concurrent runs become a real workflow.
 

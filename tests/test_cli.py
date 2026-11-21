@@ -820,5 +820,104 @@ class CleanCommandTests(unittest.TestCase):
         self.assertEqual(before, after)
 
 
+class VerifyCommandTests(unittest.TestCase):
+    """`lirk verify`: audit cached results against fresh runs."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", self.root)
+
+    def _lines(self, out, prefix):
+        return [l for l in out.splitlines() if l.startswith(prefix)]
+
+    def test_nothing_cached_means_nothing_to_verify(self):
+        code, out = _run(["verify"], self.root)
+        self.assertEqual(code, 0)
+        self.assertIn("0 verified, 0 stale, 6 target(s) not cached", out)
+
+    def test_every_cached_result_is_rerun_and_agrees(self):
+        _run(["test", "//..."], self.root)
+        code, out = _run(["verify"], self.root)
+        self.assertEqual(code, 0, out)
+        # `lirk test //...` caches all six targets under test: keys --
+        # the three tests it ran and the three libraries it validated.
+        self.assertEqual(len(self._lines(out, "  verified ")), 6)
+        self.assertIn("//a:a_test (test)", out)
+        self.assertIn("//c:c_lib (test)", out)
+        self.assertIn("6 verified, 0 stale, 0 target(s) not cached", out)
+
+    def test_build_and_test_entries_are_separate_claims(self):
+        _run(["build", "//c:c_lib"], self.root)
+        _run(["test", "//c:c_test"], self.root)
+        _, out = _run(["verify", "//c:c_lib"], self.root)
+        self.assertEqual(
+            self._lines(out, "  verified "),
+            ["  verified //c:c_lib (build)", "  verified //c:c_lib (test)"],
+        )
+
+    def test_a_single_label_fingerprints_its_closure(self):
+        # Verifying one target still needs its deps' fingerprints; only
+        # the named target is audited.
+        _run(["test", "//..."], self.root)
+        code, out = _run(["verify", "//a:a_test"], self.root)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self._lines(out, "  verified "), ["  verified //a:a_test (test)"])
+
+    def test_sample_reruns_a_reproducible_subset(self):
+        _run(["test", "//..."], self.root)
+        _, first = _run(["verify", "--sample", "2", "--seed", "7"], self.root)
+        _, second = _run(["verify", "--sample", "2", "--seed", "7"], self.root)
+        self.assertIn("sampling 2 of 6 cached results (seed 7)", first)
+        self.assertEqual(len(self._lines(first, "  verified ")), 2)
+        self.assertEqual(self._lines(first, "  verified "), self._lines(second, "  verified "))
+
+    def test_sample_must_be_positive(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+            main(["verify", "--sample", "0"], root=self.root)
+        self.assertNotEqual(caught.exception.code, 0)
+
+    def test_a_stale_green_is_reported_and_evicted(self):
+        # The exact defect verify exists to surface: a test reads a file
+        # at runtime that no target declares, so editing it changes the
+        # real answer without changing the fingerprint.
+        pkg = self.root / "story"
+        pkg.mkdir()
+        (pkg / "story.txt").write_text("once upon a time\n")
+        (pkg / "test_story.py").write_text(
+            "import unittest\nfrom pathlib import Path\n\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_story(self):\n"
+            "        text = (Path(__file__).parent / 'story.txt').read_text()\n"
+            "        self.assertTrue(text.startswith('once'))\n"
+        )
+        (pkg / "BUILD.lirk").write_text(
+            '[[target]]\nname = "story_test"\ntype = "test"\nsrcs = ["test_story.py"]\n'
+        )
+        code, _ = _run(["test", "//..."], self.root)
+        self.assertEqual(code, 0)
+
+        (pkg / "story.txt").write_text("the end\n")
+        _, out = _run(["test", "//story:story_test"], self.root)
+        self.assertIn("cached  //story:story_test", out)  # the lie
+
+        code, out = _run(["verify", "//story:story_test"], self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("STALE  //story:story_test (test)", out)
+        self.assertIn("not declared", out)
+        self.assertIn("0 verified, 1 stale", out)
+
+        cache = json.loads((self.root / ".lirk-cache.json").read_text())
+        self.assertNotIn("test://story:story_test", cache)
+        self.assertIn("test://a:a_test", cache)  # unrelated entries untouched
+
+        # Evicted, so the next ordinary run tells the truth.
+        code, out = _run(["test", "//story:story_test"], self.root)
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL   //story:story_test", out)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,5 @@
 """The `lirk` command line: `build` and `test` over one or more target
-labels or patterns, and `clean`. Output is kept compact -- this runs in
+labels or patterns, `verify` to audit cached results, and `clean`. Output is kept compact -- this runs in
 a narrow phone terminal.
 
 Label forms accepted on the command line:
@@ -383,6 +383,121 @@ def cmd_test(root: Path, labels: list[str], force: bool = False) -> int:
     return 0 if ok else 1
 
 
+def _fingerprintable(
+    root: Path, graph: Graph, order: list[str]
+) -> dict[str, str] | None:
+    """Fingerprints for every target in `order` that can have one: those
+    whose declared files all exist, and whose deps can too. None if a
+    file vanished mid-read (already reported)."""
+    excluded: set[str] = set()
+    for label in order:
+        if missing_files(graph.targets[label], root) or any(
+            d in excluded for d in graph.edges[label]
+        ):
+            excluded.add(label)
+    try:
+        return compute_fingerprints(graph, root, [l for l in order if l not in excluded])
+    except CacheError as e:
+        print(f"lirk: {e}", file=sys.stderr)
+        return None
+
+
+def cmd_verify(
+    root: Path, labels: list[str], sample: int | None = None, seed: int | None = None
+) -> int:
+    """Re-run cached results with the cache bypassed and compare.
+
+    The cache's whole promise is that a `cached` line means exactly what
+    a fresh run would say. This checks that promise directly instead of
+    trusting it: every entry that is currently valid (its fingerprint
+    matches) is re-validated or re-run, and any that now FAILs is a
+    stale green -- an input the fingerprint did not cover. That is a
+    real bug, in lirk or in the BUILD files (an undeclared runtime
+    input, say), so it is reported loudly, its entry is deleted so the
+    next ordinary run redoes it, and the exit status is 1.
+
+    Targets that are not cached are not run: there is no claim to check.
+    `sample` re-runs a random subset, for a cheap periodic audit; the
+    seed is printed so a disagreement can be reproduced.
+    """
+    resolved = _resolve_roots(root, labels, "build")
+    if resolved is None:
+        return 1
+    graph, order, roots = resolved
+    # Only the named targets are audited, but a fingerprint folds in its
+    # deps' fingerprints, so the whole closure must be fingerprinted.
+    closure = transitive_closure(graph, roots)
+    fingerprints = _fingerprintable(root, graph, [l for l in order if l in closure])
+    if fingerprints is None:
+        return 1
+    subset_order = [l for l in order if l in roots]
+
+    cache_path = root / CACHE_FILENAME
+    cache = load_cache(cache_path)
+
+    # Each (mode, label) whose entry is valid right now. Both modes cache
+    # every target they process (a library validated during `lirk test`
+    # is stored as test:<label>), so each entry is its own claim, checked
+    # by re-doing what that mode did for that target.
+    claims = [
+        (mode, label)
+        for label in subset_order
+        if label in fingerprints
+        for mode in ("build", "test")
+        if not needs_build(f"{mode}:{label}", fingerprints[label], cache)
+    ]
+    claimed = {label for _, label in claims}
+    not_cached = sum(1 for l in subset_order if l not in claimed)
+
+    if sample is not None and sample < len(claims):
+        import random  # only paid for when sampling is asked for
+
+        if seed is None:
+            seed = random.SystemRandom().randrange(2**32)
+        print(f"lirk: sampling {sample} of {len(claims)} cached results (seed {seed})")
+        chosen = set(random.Random(seed).sample(range(len(claims)), sample))
+        claims = [c for i, c in enumerate(claims) if i in chosen]
+
+    owners = owner_index(graph.targets, root)
+    stale: list[str] = []
+    verified = 0
+    for mode, label in claims:
+        target = graph.targets[label]
+        env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}))
+        if mode == "test" and target.type == "test":
+            result = run_test(target, root, env)
+        else:
+            result = validate_target(target, root, env)
+        if result.ok:
+            verified += 1
+            print(f"  verified {label} ({mode})", flush=True)
+            continue
+        stale.append(f"{label} ({mode})")
+        cache.pop(f"{mode}:{label}", None)
+        save_cache(cache_path, cache)
+        print(f"  STALE  {label} ({mode}): cached as passing, fails when re-run: "
+              f"{result.message}", flush=True)
+        for stream in (result.stdout, result.stderr):
+            if stream.strip():
+                print(stream.rstrip(), flush=True)
+
+    if stale:
+        print("lirk: stale cached results (removed from the cache):")
+        for entry in stale:
+            print(f"  {entry}")
+        print(
+            "lirk: an input these targets depend on is not in their "
+            "fingerprint -- often a file read at runtime but not declared "
+            "in `data`"
+        )
+    print(
+        f"lirk: {verified} verified, {len(stale)} stale, "
+        f"{not_cached} target(s) not cached"
+    )
+    print("lirk: OK" if not stale else "lirk: FAILED")
+    return 1 if stale else 0
+
+
 def cmd_clean(root: Path) -> int:
     """Delete the incremental-build cache, and any temp file an
     interrupted save left beside it.
@@ -466,6 +581,22 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
     )
     test_p.add_argument("--root", type=Path, default=None, help=root_help)
 
+    verify_p = sub.add_parser(
+        "verify", help="re-run cached results and fail on any that disagree"
+    )
+    verify_p.add_argument(
+        "labels", nargs="*", default=[ALL_TARGETS], metavar="label",
+        help=label_help + " (default: //...)",
+    )
+    verify_p.add_argument(
+        "--sample", type=int, default=None, metavar="N",
+        help="re-run a random N of the cached results instead of all of them",
+    )
+    verify_p.add_argument(
+        "--seed", type=int, default=None, help="seed for --sample, to reproduce a run"
+    )
+    verify_p.add_argument("--root", type=Path, default=None, help=root_help)
+
     clean_p = sub.add_parser("clean", help="delete the incremental-build cache")
     clean_p.add_argument("--root", type=Path, default=None, help=root_help)
 
@@ -492,6 +623,10 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         return cmd_build(root, args.labels, force=args.force)
     if args.command == "clean":
         return cmd_clean(root)
+    if args.command == "verify":
+        if args.sample is not None and args.sample < 1:
+            parser.error("--sample must be at least 1")
+        return cmd_verify(root, args.labels, sample=args.sample, seed=args.seed)
     return cmd_test(root, args.labels, force=args.force)
 
 

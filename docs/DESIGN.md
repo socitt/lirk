@@ -445,6 +445,19 @@ through any rework.
 `--force` / `--rebuild` / `--rerun` bypasses the cache *check* without
 deleting or truncating the cache file.
 
+**`lirk verify` audits the cache instead of trusting it.** Every
+`mode:label` entry that is valid right now is a claim — "a fresh run
+would pass" — and verify re-does what that mode did for that target
+(run the tests, or validate) and compares. A failure is a stale green:
+some input the fingerprint does not cover, in lirk or in the BUILD files
+(most often a file read at runtime but not declared in `data`). It is
+printed as `STALE`, the entry is deleted so the next ordinary run tells
+the truth, and the exit status is 1. Targets with no valid entry are
+counted, not run, since there is no claim to check. `--sample N` audits
+a random subset with a printed seed, for a cheap periodic check. This is
+what turns v1 criterion 2's "zero cache-correctness bugs" from a
+reported number into a measured one.
+
 ---
 
 ## 5. Executing actions
