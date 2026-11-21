@@ -105,8 +105,10 @@ pip install .          # or: pip install -e .   (editable, for development)
 Either way installs a `lirk` console script on `PATH`:
 
 ```
-lirk build //...
-lirk test //...
+lirk build //...                  # everything
+lirk test //app/... //lib:all     # a subtree, plus one whole package
+lirk test //app:app_test --force  # one target, ignoring the cache
+lirk clean                        # discard the incremental-build cache
 ```
 
 ## Scope (v1)

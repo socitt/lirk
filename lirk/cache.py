@@ -26,7 +26,7 @@ class CacheError(Exception):
 # Bump this whenever the behaviour of `validate_target` or `run_test`
 # changes, so existing caches are invalidated instead of trusting a
 # green result computed under different rules.
-ACTION_VERSION = 10
+ACTION_VERSION = 11
 
 
 def _hash_file(path: Path, label: str) -> str:
@@ -75,6 +75,12 @@ def compute_fingerprints(
         h.update(target.name.encode())
         h.update(target.type.encode())
         h.update(str(ACTION_VERSION).encode())
+        if target.timeout is not None:
+            # Folded in only when set, so targets without one keep the
+            # fingerprint shape they always had. A pass under a 600s
+            # budget says nothing about a 5s one, so changing it must
+            # invalidate the cached result.
+            h.update(f"timeout={target.timeout}".encode())
 
         for src in sorted(target.srcs):
             src_path = root / target.package / src

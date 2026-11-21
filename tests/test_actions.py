@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -336,6 +337,22 @@ class RunTestTests(unittest.TestCase):
         self.assertIn("test_hang", result.message)
         self.assertIn("test_after", result.message)
 
+    def test_timeout_after_output_is_reported_not_a_crash(self):
+        # The target declares `timeout = 1` itself, so this also proves
+        # the per-target timeout is honoured without patching anything.
+        # Its src prints before hanging: TimeoutExpired carries that as
+        # bytes, which lirk used to join with str and crash on.
+        root = FIXTURES / "hang_repo"
+        graph = build_graph(root)
+
+        result = run_test(graph.targets["//a:noisy_hang_test"], root)
+
+        self.assertFalse(result.ok)
+        self.assertIn("timed out after 1s", result.message)
+        self.assertIsInstance(result.stdout, str)
+        self.assertIn("partial output before the hang", result.stdout)
+        self.assertIn("partial stderr before the hang", result.stderr)
+
     def test_module_containing_zero_tests_is_a_failure(self):
         # Exits 5 on 3.12+ but 0 on 3.11, which pyproject still
         # supports, so an exit-code-only check passes a file that tests
@@ -424,6 +441,82 @@ class RunTestTests(unittest.TestCase):
         # The failing one is one/test_dup.py; two/test_dup.py passes.
         self.assertIn("one.test_dup", result.message)
         self.assertNotIn("two.test_dup", result.message)
+
+
+
+class RanZeroTestsTests(unittest.TestCase):
+    """Only unittest's own closing summary counts, not an echoed one."""
+
+    def test_zero_summary_is_detected(self):
+        self.assertTrue(actions._ran_zero_tests("\n----\nRan 0 tests in 0.000s\n\nNO TESTS RAN\n"))
+
+    def test_a_nonzero_summary_is_not_zero(self):
+        self.assertFalse(actions._ran_zero_tests("Ran 3 tests in 0.010s\n\nOK\n"))
+
+    def test_singular_summary_is_recognised(self):
+        self.assertFalse(actions._ran_zero_tests("Ran 1 test in 0.001s\n\nOK\n"))
+
+    def test_an_echoed_inner_summary_does_not_fail_the_outer_run(self):
+        # A test that drives unittest itself (lirk's own suite does) can
+        # print an inner run's "Ran 0 tests" before its own summary.
+        stderr = (
+            "inner output:\nRan 0 tests in 0.000s\n\nNO TESTS RAN\n"
+            ".\n----\nRan 1 test in 0.200s\n\nOK\n"
+        )
+        self.assertFalse(actions._ran_zero_tests(stderr))
+
+    def test_mid_line_mention_is_ignored(self):
+        self.assertFalse(actions._ran_zero_tests("log: Ran 0 tests in x\nRan 2 tests in 0.1s\n"))
+
+    def test_no_summary_at_all_is_not_zero(self):
+        # A crash before unittest summarises is caught by the exit code.
+        self.assertFalse(actions._ran_zero_tests("Traceback ...\n"))
+
+
+class SharedSrcOwnershipTests(unittest.TestCase):
+    """A src declared by two targets: either one in the closure suffices."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name)
+        (self.root / "shared").mkdir()
+        (self.root / "shared" / "util.py").write_text("X = 1\n")
+        (self.root / "shared" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "one"\ntype = "library"\nsrcs = ["util.py"]\n\n'
+            '[[target]]\nname = "two"\ntype = "library"\nsrcs = ["util.py"]\n'
+        )
+        (self.root / "app").mkdir()
+        (self.root / "app" / "app.py").write_text("from shared import util\n")
+
+    def _validate_with_dep(self, dep):
+        deps = f'deps = ["{dep}"]\n' if dep else ""
+        (self.root / "app" / "BUILD.lirk").write_text(
+            f'[[target]]\nname = "app"\ntype = "library"\nsrcs = ["app.py"]\n{deps}'
+        )
+        graph = build_graph(self.root)
+        return validate_target(
+            graph.targets["//app:app"], self.root, _import_env(graph, self.root, "//app:app")
+        )
+
+    def test_index_records_every_declaring_target(self):
+        self._validate_with_dep(None)  # writes app's BUILD.lirk
+        graph = build_graph(self.root)
+        index = owner_index(graph.targets, self.root)
+        self.assertEqual(
+            index[(self.root / "shared" / "util.py").resolve()],
+            frozenset({"//shared:one", "//shared:two"}),
+        )
+
+    def test_depending_on_either_declaring_target_is_enough(self):
+        for dep in ("//shared:one", "//shared:two"):
+            with self.subTest(dep=dep):
+                self.assertTrue(self._validate_with_dep(dep).ok)
+
+    def test_depending_on_neither_names_both(self):
+        result = self._validate_with_dep(None)
+        self.assertFalse(result.ok)
+        self.assertIn("//shared:one, //shared:two", result.message)
 
 
 if __name__ == "__main__":

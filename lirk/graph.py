@@ -11,6 +11,7 @@ root). Dependencies reference other targets by label:
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,16 +31,24 @@ def find_build_files(root: Path, ignore: Sequence[str] = ()) -> list[Path]:
 
     `ignore` additionally excludes the given root-relative directories
     and everything beneath them; see targets.load_ignores.
+
+    Excluded directories are pruned from the walk, not filtered out
+    afterwards: a `.git` or `.venv` can hold tens of thousands of
+    entries, and on iSH-AOK every stat is slow, so descending into a
+    tree only to discard everything found there is the dominant cost
+    of the scan. Symlinked directories are not followed, as before.
     """
-    ignored = [Path(entry.strip("/")) for entry in ignore if entry.strip("/")]
+    ignored = {Path(entry.strip("/")) for entry in ignore if entry.strip("/")}
     found = []
-    for path in root.rglob(BUILD_FILENAME):
-        rel_dir = path.relative_to(root).parent
-        if any(part.startswith(".") for part in rel_dir.parts):
-            continue
-        if any(rel_dir == ig or ig in rel_dir.parents for ig in ignored):
-            continue
-        found.append(path)
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel_dir = Path(dirpath).relative_to(root)
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if not d.startswith(".") and (rel_dir / d) not in ignored
+        ]
+        if BUILD_FILENAME in filenames:
+            found.append(Path(dirpath) / BUILD_FILENAME)
     return sorted(found)
 
 
@@ -114,28 +123,38 @@ def topological_sort(graph: Graph) -> list[str]:
     """Order target labels so every dependency precedes its dependents.
 
     Raises GraphError (naming the full cycle) if the graph isn't a DAG.
+
+    An iterative depth-first search with an explicit stack, producing
+    exactly the order the obvious recursive version would. Recursion
+    overflowed Python's ~1000-frame limit on a long enough dependency
+    chain and escaped as a RecursionError traceback.
     """
     WHITE, GRAY, BLACK = 0, 1, 2
     color = {label: WHITE for label in graph.targets}
     order: list[str] = []
-    stack: list[str] = []
 
-    def visit(label: str) -> None:
-        color[label] = GRAY
-        stack.append(label)
-        for dep in graph.edges[label]:
-            if color[dep] == WHITE:
-                visit(dep)
+    for start in sorted(graph.targets):
+        if color[start] != WHITE:
+            continue
+        color[start] = GRAY
+        # path[i] is the label at depth i, frames[i] its pending deps;
+        # path doubles as the GRAY chain used to name a cycle.
+        path = [start]
+        frames = [iter(graph.edges[start])]
+        while frames:
+            dep = next(frames[-1], None)
+            if dep is None:
+                frames.pop()
+                done = path.pop()
+                color[done] = BLACK
+                order.append(done)
+            elif color[dep] == WHITE:
+                color[dep] = GRAY
+                path.append(dep)
+                frames.append(iter(graph.edges[dep]))
             elif color[dep] == GRAY:
-                cycle = stack[stack.index(dep):] + [dep]
+                cycle = path[path.index(dep):] + [dep]
                 raise GraphError("circular dependency: " + " -> ".join(cycle))
-        stack.pop()
-        color[label] = BLACK
-        order.append(label)
-
-    for label in sorted(graph.targets):
-        if color[label] == WHITE:
-            visit(label)
 
     return order
 

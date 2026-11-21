@@ -1,6 +1,14 @@
-"""The `lirk` command line: `build` and `test`, over a single target
-label or `//...` for the whole repo. Output is kept compact -- this
-runs in a narrow phone terminal.
+"""The `lirk` command line: `build` and `test` over one or more target
+labels or patterns, and `clean`. Output is kept compact -- this runs in
+a narrow phone terminal.
+
+Label forms accepted on the command line:
+
+- `//pkg:name`  -- exactly that target.
+- `//pkg:all`   -- every target in package `pkg` (`//:all` for the root
+  package). An actual target named `all` takes precedence.
+- `//pkg/...`   -- every target in `pkg` and all packages beneath it.
+- `//...`       -- every target in the repo.
 """
 
 from __future__ import annotations
@@ -29,6 +37,78 @@ from lirk.graph import Graph, GraphError, build_graph, topological_sort, transit
 from lirk.targets import ROOT_MARKER, ConfigError
 
 ALL_TARGETS = "//..."
+RECURSIVE_SUFFIX = "/..."
+PACKAGE_WILDCARD = "all"
+
+
+class LabelError(Exception):
+    """A command-line label or pattern is malformed or matches nothing."""
+
+
+def _expand_pattern(graph: Graph, pattern: str) -> tuple[set[str], bool]:
+    """Labels one command-line argument names, and whether it was a
+    wildcard (as opposed to naming a single target explicitly).
+
+    The distinction matters to `lirk test`: a wildcard quietly narrows to
+    the test targets it covers, while an explicit non-test label is an
+    error, exactly as before patterns existed.
+    """
+    if not pattern.startswith("//"):
+        raise LabelError(
+            f"invalid label {pattern!r}: command-line labels must be absolute "
+            "(start with '//')"
+        )
+
+    if pattern == ALL_TARGETS:
+        return set(graph.targets), True
+
+    if pattern.endswith(RECURSIVE_SUFFIX) and ":" not in pattern:
+        prefix = pattern[2 : -len(RECURSIVE_SUFFIX)].strip("/")
+        matched = {
+            label
+            for label, t in graph.targets.items()
+            if t.package == prefix or t.package.startswith(prefix + "/")
+        }
+        if not matched:
+            raise LabelError(f"pattern {pattern} matches no targets")
+        return matched, True
+
+    if pattern in graph.targets:
+        return {pattern}, False
+
+    package, sep, name = pattern[2:].rpartition(":")
+    if sep and name == PACKAGE_WILDCARD:
+        matched = {l for l, t in graph.targets.items() if t.package == package}
+        if not matched:
+            raise LabelError(f"pattern {pattern} matches no targets")
+        return matched, True
+
+    if not sep or not name:
+        raise LabelError(
+            f"malformed label {pattern!r}: expected //package:name, "
+            "//package:all, //package/... or //..."
+        )
+    raise LabelError(f"unknown target: {pattern}")
+
+
+def _select_roots(graph: Graph, patterns: list[str], mode: str) -> set[str]:
+    """Union of every pattern's labels, narrowed for `test` mode.
+
+    Raises LabelError for a malformed pattern, one matching nothing, or
+    (in test mode) an explicit label naming a non-test target.
+    """
+    roots: set[str] = set()
+    for pattern in patterns:
+        matched, wildcard = _expand_pattern(graph, pattern)
+        if mode == "test":
+            if not wildcard:
+                (label,) = matched
+                type_ = graph.targets[label].type
+                if type_ != "test":
+                    raise LabelError(f"{label} is type {type_!r}, not 'test'")
+            matched = {l for l in matched if graph.targets[l].type == "test"}
+        roots |= matched
+    return roots
 
 
 def _discover_root(start: Path) -> Path:
@@ -242,20 +322,28 @@ def _print_failures(summary: ExecutionSummary) -> None:
         print(f"  {label}")
 
 
-def cmd_build(root: Path, label: str, force: bool = False) -> int:
+def _resolve_roots(
+    root: Path, labels: list[str], mode: str
+) -> tuple[Graph, list[str], set[str]] | None:
+    """Load the graph and expand `labels`, printing any error."""
     loaded = _load_graph(root)
     if loaded is None:
-        return 1
+        return None
     graph, order = loaded
-
-    if label == ALL_TARGETS:
-        roots = set(graph.targets)
-    elif label in graph.targets:
-        roots = {label}
-    else:
-        print(f"lirk: unknown target: {label}", file=sys.stderr)
+    try:
+        roots = _select_roots(graph, labels, mode)
+    except LabelError as e:
+        print(f"lirk: {e}", file=sys.stderr)
         print(f"lirk: repo root is {root}", file=sys.stderr)
+        return None
+    return graph, order, roots
+
+
+def cmd_build(root: Path, labels: list[str], force: bool = False) -> int:
+    resolved = _resolve_roots(root, labels, "build")
+    if resolved is None:
         return 1
+    graph, order, roots = resolved
 
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
@@ -270,29 +358,19 @@ def cmd_build(root: Path, label: str, force: bool = False) -> int:
     return 0 if ok else 1
 
 
-def cmd_test(root: Path, label: str, force: bool = False) -> int:
-    loaded = _load_graph(root)
-    if loaded is None:
+def cmd_test(root: Path, labels: list[str], force: bool = False) -> int:
+    resolved = _resolve_roots(root, labels, "test")
+    if resolved is None:
         return 1
-    graph, order = loaded
+    graph, order, roots = resolved
 
-    if label == ALL_TARGETS:
-        roots = {l for l in graph.targets if graph.targets[l].type == "test"}
-        if not roots:
-            print("lirk: no test targets found")
-            return 0
-    elif label not in graph.targets:
-        print(f"lirk: unknown target: {label}", file=sys.stderr)
-        print(f"lirk: repo root is {root}", file=sys.stderr)
-        return 1
-    elif graph.targets[label].type != "test":
-        print(
-            f"lirk: {label} is type {graph.targets[label].type!r}, not 'test'",
-            file=sys.stderr,
-        )
-        return 1
-    else:
-        roots = {label}
+    if not roots:
+        # Only reachable through wildcards: an explicit label is either
+        # a test target or already an error. A pattern that matched
+        # targets, none of them tests, is not a failure -- there was
+        # simply nothing to run.
+        print("lirk: no test targets found")
+        return 0
 
     closure = transitive_closure(graph, roots)
     subset_order = [l for l in order if l in closure]
@@ -303,6 +381,30 @@ def cmd_test(root: Path, label: str, force: bool = False) -> int:
     print(f"lirk: {passed}/{summary.tests_total} tests passed")
     print("lirk: OK" if ok else "lirk: FAILED")
     return 0 if ok else 1
+
+
+def cmd_clean(root: Path) -> int:
+    """Delete the incremental-build cache, and any temp file an
+    interrupted save left beside it.
+
+    The next run rebuilds and reruns everything. Unlike `--force`, which
+    bypasses the cache for one run without touching it, this discards
+    it. Nothing outside the cache files is touched: lirk writes nothing
+    else into the repo (the __pycache__ directories are Python's own).
+    """
+    cache_path = root / CACHE_FILENAME
+    removed = []
+    for path in [cache_path, *sorted(root.glob(f"{CACHE_FILENAME}.*.tmp"))]:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        removed.append(path.name)
+    if removed:
+        print(f"lirk: removed {', '.join(removed)}")
+    else:
+        print(f"lirk: no cache to remove in {root}")
+    return 0
 
 
 class _VersionAction(argparse.Action):
@@ -346,21 +448,26 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         f"{ROOT_MARKER} marker file, else cwd itself)"
     )
 
-    build_p = sub.add_parser("build", help="validate a target and its deps")
-    build_p.add_argument("label", help="//path:target or //...")
+    label_help = "one or more of //pkg:name, //pkg:all, //pkg/..., //..."
+
+    build_p = sub.add_parser("build", help="validate targets and their deps")
+    build_p.add_argument("labels", nargs="+", metavar="label", help=label_help)
     build_p.add_argument(
         "--force", "--rebuild", action="store_true", dest="force",
         help="bypass the cache and re-validate every target in scope",
     )
     build_p.add_argument("--root", type=Path, default=None, help=root_help)
 
-    test_p = sub.add_parser("test", help="run a test target")
-    test_p.add_argument("label", help="//path:target or //...")
+    test_p = sub.add_parser("test", help="run test targets")
+    test_p.add_argument("labels", nargs="+", metavar="label", help=label_help)
     test_p.add_argument(
         "--force", "--rerun", action="store_true", dest="force",
         help="bypass the cache and re-run every test in scope",
     )
     test_p.add_argument("--root", type=Path, default=None, help=root_help)
+
+    clean_p = sub.add_parser("clean", help="delete the incremental-build cache")
+    clean_p.add_argument("--root", type=Path, default=None, help=root_help)
 
     args = parser.parse_args(argv)
     if root is None:
@@ -382,8 +489,10 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
                 )
 
     if args.command == "build":
-        return cmd_build(root, args.label, force=args.force)
-    return cmd_test(root, args.label, force=args.force)
+        return cmd_build(root, args.labels, force=args.force)
+    if args.command == "clean":
+        return cmd_clean(root)
+    return cmd_test(root, args.labels, force=args.force)
 
 
 if __name__ == "__main__":

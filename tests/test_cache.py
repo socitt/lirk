@@ -53,6 +53,21 @@ class ComputeFingerprintsTests(unittest.TestCase):
         # are unaffected by an edit in a target they don't depend on.
         self.assertNotEqual(before["//c:c_test"], after["//c:c_test"])
 
+    def test_test_timeout_is_part_of_the_fingerprint(self):
+        # A pass under a generous budget says nothing about a tight one.
+        build = self.root / "c" / "BUILD.lirk"
+        original = build.read_text()
+        _, _, before = self._fingerprints()
+
+        build.write_text(original.replace('name = "c_test"', 'name = "c_test"\ntimeout = 5'))
+        _, _, five = self._fingerprints()
+        build.write_text(original.replace('name = "c_test"', 'name = "c_test"\ntimeout = 9'))
+        _, _, nine = self._fingerprints()
+
+        self.assertNotEqual(before["//c:c_test"], five["//c:c_test"])
+        self.assertNotEqual(five["//c:c_test"], nine["//c:c_test"])
+        self.assertEqual(before["//c:c_lib"], five["//c:c_lib"])
+
     def test_unrelated_target_is_unaffected(self):
         before_graph, before_order, before = self._fingerprints()
 

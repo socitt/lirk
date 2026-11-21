@@ -96,7 +96,9 @@ data = ["fixture.txt"]
 
 Fields (`lirk/targets.py`): `name` (required, non-empty, unique per
 file), `type` (required, `library` or `test`), `srcs`, `deps`, `data`
-(all default `[]`). Unknown keys are **rejected** at parse time — a
+(all default `[]`), and `timeout` (`test` only, optional positive
+integer seconds; see §5). A repeated entry within `srcs`, `deps` or
+`data` is rejected — a repeated test src would run twice. Unknown keys are **rejected** at parse time — a
 transposed `dpes` used to silently produce a target with no dependency
 edges, which meant changes to the real dependency never invalidated it.
 A `test` target with **no srcs** is also rejected: the run loop would
@@ -126,6 +128,16 @@ indistinguishably from a real pass.
 Fully qualified: `//package:name`. Relative to the same package:
 `:name`. Root package: `//:name`.
 
+On the command line, three wildcard forms also select targets:
+`//pkg:all` (one package), `//pkg/...` (a package and its subtree), and
+`//...` (everything); several labels may be given and are unioned. An
+explicit label still beats a same-named wildcard, so a target named
+`all` stays addressable. Under `lirk test` a wildcard narrows to the
+`test` targets it covers, while an explicitly named non-test target is
+an error — the same rule `//...` always followed, generalised. A
+wildcard matching nothing is an error, since it is nearly always a
+typo; one matching only libraries under `lirk test` is not.
+
 `lirk/graph.py:resolve_label` validates shape eagerly — exactly one
 `:`, non-empty name part — so a malformed `//a` reports *malformed
 label* rather than sending the reader hunting for a target named `//a`
@@ -141,7 +153,9 @@ graph LR
 Deps cross package directories freely. The graph is validated at
 construction: missing deps, self-deps, and duplicate labels all raise
 `GraphError`, and `topological_sort` reports cycles **naming the full
-path**, not just "a cycle exists".
+path**, not just "a cycle exists". The sort is an iterative DFS with
+an explicit stack — the recursive version escaped as a `RecursionError`
+traceback on a chain deeper than Python's ~1000-frame limit.
 
 ### Repo root discovery
 
@@ -169,6 +183,12 @@ The **downward** scan (`find_build_files`) skips any `BUILD.lirk` under
 a dot-prefixed directory, checked relative to root. Without that, a
 vendored or nested checkout under `.venv/` gets pulled into an
 unrelated repo-wide build.
+
+The scan is an `os.walk` that **prunes** dot-prefixed and ignored
+directories rather than an `rglob` filtered afterwards. The difference
+is the whole cost of the scan on a slow filesystem: `.git` and `.venv`
+routinely hold tens of thousands of entries, all of which `rglob`
+stat'ed only to discard.
 
 The dot-prefix rule alone is not enough, because plenty of directories
 that hold foreign `BUILD.lirk` files are not dot-prefixed —
@@ -316,6 +336,13 @@ Four decisions inside it, none of them free:
   the same trees. A second parse would only be a second chance to
   disagree with the first.
 
+A src **declared by more than one target** maps to all of them in the
+owner index, and the import is allowed if any one is in the importer's
+closure — each of them fingerprints the file, so any one is enough.
+The index once kept a single owner, whichever declaration was indexed
+last, which made a correct `deps` entry on the other declaring target
+report as an undeclared import.
+
 `ImportEnv` (the owner index plus the target's allowed labels) is built
 by `cli.py` and passed in, so `actions.py` still doesn't import the
 graph layer. When it is absent, `validate_target` does the syntax check
@@ -338,7 +365,8 @@ having actually run it. This guards a bug that really shipped.
 **Fingerprint** (`compute_fingerprints`) is a SHA-256 over, in order:
 
 1. target `name` and `type`
-2. `ACTION_VERSION`
+2. `ACTION_VERSION`, then `timeout` **only if set** — so a target
+   without one keeps the fingerprint shape it always had
 3. each `srcs` entry, **sorted**: filename + SHA-256 of contents
 4. each `data` entry, sorted: name, then either its SHA-256 (a file)
    or, for a directory, every file beneath it sorted by relative path,
@@ -366,10 +394,11 @@ Consequences worth stating explicitly:
   forever. This fired silently twice before the constant existed —
   once when `ast.parse` validation was added, once when the test
   subprocess environment changed. **Bump it in the same commit as any
-  change to `validate_target` or `run_test` behavior.** Currently `10`
-  — the last bump extended the import check to files no target
-  declares, which changes what a passing build means, so caches written
-  before it must not be trusted.
+  change to `validate_target` or `run_test` behavior.** Currently `11`
+  — the last bump accompanied the per-target `timeout`, the anchored
+  zero-tests check, and multi-owner srcs in the import check. None of
+  those make a previously-cached pass wrong, but the rule is "any
+  behavior change", and the cost of honouring it is one full rerun.
 - **Content hashing, not mtimes.** Immune to `touch`, to fresh
   checkouts, to clock skew, and to iSH-AOK's questionable time
   accounting (observed reporting `user 24m40s` for a 42s run). A whole
@@ -441,12 +470,18 @@ subprocess.run(
   and fails fast. This matters because the primary consumer is a repo
   of interactive terminal games whose tests pipe input into game
   entrypoints.
-- **`timeout=600s`**, chosen not to trip the slowest known real target
-  (~12s). A timeout reports a clean failure with whatever partial
+- **`timeout=600s`** by default, chosen not to trip the slowest known
+  real target (~12s); a `test` target may set its own `timeout` in
+  seconds, which also enters its fingerprint. A timeout reports a clean failure with whatever partial
   output was captured. Known limitation, accepted deliberately: this
   kills only the direct child, so a `main_test.py` that spawned its own
   `main.py` can leave that grandchild running. Killing the tree needs a
   process group. A partially-cleaned timeout beats an unbounded hang.
+  `TimeoutExpired` carries the partial output as **bytes** even under
+  `text=True` (CPython decodes only on the normal return path), so it
+  is decoded explicitly; joining it raw with other srcs' `str` output
+  crashed lirk with a `TypeError` whenever a timed-out test had printed
+  anything.
 - **Every src runs even after an earlier one fails** — *including*
   after one times out. Failures accumulate into
   `N of M src files failed: ...`. Stopping at the first failure was
@@ -458,9 +493,11 @@ subprocess.run(
 - **A module that runs zero tests fails.** `unittest` exits 5
   (`NO TESTS RAN`) on 3.12+ but 0 on 3.11, which `pyproject.toml` still
   supports, so an exit-code-only check reports a false PASS for a file
-  that tests nothing. lirk keys off the `Ran 0 tests` summary line,
+  that tests nothing. lirk keys off the `Ran N tests in` summary line,
   written on every version, and checks it independently of the exit
-  code so the reason is named on 3.12 too.
+  code so the reason is named on 3.12 too. Only the *last* such line,
+  anchored at a line start, counts: a test that drives unittest itself
+  can echo an inner run's `Ran 0 tests` before its own summary.
 
 **Test output is passed through raw**, unsummarized and unreformatted.
 Two independent assessments identified this as a practical strength.
@@ -548,7 +585,7 @@ Recorded so a later session doesn't relitigate them:
 | `lirk/graph.py` | Scan repo, resolve labels, build `Graph`, topological sort, transitive closure |
 | `lirk/cache.py` | `ACTION_VERSION`, fingerprints, atomic cache load/save, `needs_build` |
 | `lirk/actions.py` | `missing_files`, `validate_target`, `run_test` — the only place a subprocess is spawned |
-| `lirk/cli.py` | Arg parsing, root discovery, `_execute` loop, summaries, exit codes |
+| `lirk/cli.py` | Arg parsing, label patterns, root discovery, `_execute` loop, summaries, `clean`, exit codes |
 | `bin/lirk` | Path-inserting shim for running from a checkout without installing |
 
 Tests are plain `unittest`, run with
@@ -565,7 +602,7 @@ Tests are plain `unittest`, run with
 | `multisrc_repo` | Multi-src library and test targets; later failures not hidden by earlier ones |
 | `data_dep_repo` | `data` field: fingerprinted, not syntax-checked |
 | `datadir_repo` | `data` naming a directory: recursive fingerprint, add/remove detection, `__pycache__` exclusion |
-| `hang_repo` | Test timeout path, and that a timeout doesn't abandon later srcs |
+| `hang_repo` | Test timeout path, that a timeout doesn't abandon later srcs, a per-target `timeout`, and partial output from a timed-out src |
 | `no_tests_repo` | A test module defining no tests fails rather than passing |
 | `stdin_repo` | Child does not inherit lirk's stdin |
 | `subdir_test_repo`, `stem_collision_repo` | Test srcs in package subdirectories; same-stem srcs don't collide |
