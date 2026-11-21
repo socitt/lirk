@@ -7,6 +7,7 @@ from unittest.mock import patch
 from lirk import cache as cache_module
 from lirk.cache import (
     compute_fingerprints,
+    environment_fingerprint,
     load_cache,
     needs_build,
     save_cache,
@@ -203,6 +204,73 @@ class NeedsBuildTests(unittest.TestCase):
     def test_false_when_fingerprint_matches(self):
         cache = {"//a:a_lib": "same"}
         self.assertFalse(needs_build("//a:a_lib", "same", cache))
+
+
+class EnvironmentFingerprintTests(unittest.TestCase):
+    """The interpreter and installed packages are inputs too: changing
+    either must invalidate cached results, not leave a stale green."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.site = Path(tmpdir.name) / "site-packages"
+        self.site.mkdir()
+        (self.site / "requests-2.31.0.dist-info").mkdir()
+        (self.site / "requests").mkdir()
+
+    def _fp(self):
+        return environment_fingerprint([str(self.site)])
+
+    def test_stable_when_nothing_changes(self):
+        self.assertEqual(self._fp(), self._fp())
+
+    def test_package_upgrade_changes_it(self):
+        before = self._fp()
+        (self.site / "requests-2.31.0.dist-info").rename(self.site / "requests-2.32.0.dist-info")
+        self.assertNotEqual(before, self._fp())
+
+    def test_install_and_removal_change_it(self):
+        before = self._fp()
+        (self.site / "attrs-23.1.0.dist-info").mkdir()
+        installed = self._fp()
+        self.assertNotEqual(before, installed)
+        (self.site / "attrs-23.1.0.dist-info").rmdir()
+        self.assertEqual(before, self._fp())
+
+    def test_package_contents_and_non_metadata_entries_are_ignored(self):
+        # Only metadata names count: the listing must not be perturbed
+        # by __pycache__ churn or by files inside a package.
+        before = self._fp()
+        (self.site / "requests" / "extra.py").write_text("")
+        (self.site / "__pycache__").mkdir()
+        self.assertEqual(before, self._fp())
+
+    def test_legacy_egg_info_counts(self):
+        before = self._fp()
+        (self.site / "oldpkg-1.0.egg-info").mkdir()
+        self.assertNotEqual(before, self._fp())
+
+    def test_missing_site_dir_is_harmless(self):
+        environment_fingerprint([str(self.site / "nope")])
+
+    def test_interpreter_version_changes_it(self):
+        before = self._fp()
+        with patch.object(cache_module.sys, "version_info", (3, 99, 0)):
+            self.assertNotEqual(before, self._fp())
+
+    def test_environment_reaches_every_target_fingerprint(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name) / "repo"
+        shutil.copytree(FIXTURES / "sample_repo", root)
+        graph = build_graph(root)
+        order = topological_sort(graph)
+
+        one = compute_fingerprints(graph, root, order, environment="env-one")
+        two = compute_fingerprints(graph, root, order, environment="env-two")
+
+        for label in graph.targets:
+            self.assertNotEqual(one[label], two[label], label)
 
 
 if __name__ == "__main__":

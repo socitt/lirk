@@ -365,8 +365,9 @@ having actually run it. This guards a bug that really shipped.
 **Fingerprint** (`compute_fingerprints`) is a SHA-256 over, in order:
 
 1. target `name` and `type`
-2. `ACTION_VERSION`, then `timeout` **only if set** — so a target
-   without one keeps the fingerprint shape it always had
+2. `ACTION_VERSION`, then the **environment fingerprint**, then
+   `timeout` **only if set** — so a target without one keeps the
+   fingerprint shape it always had
 3. each `srcs` entry, **sorted**: filename + SHA-256 of contents
 4. each `data` entry, sorted: name, then either its SHA-256 (a file)
    or, for a directory, every file beneath it sorted by relative path,
@@ -399,6 +400,20 @@ Consequences worth stating explicitly:
   zero-tests check, and multi-owner srcs in the import check. None of
   those make a previously-cached pass wrong, but the rule is "any
   behavior change", and the cost of honouring it is one full rerun.
+- **The Python environment is an input.** `environment_fingerprint()`
+  hashes the interpreter (implementation and full version) and the
+  sorted names of every `*.dist-info`/`*.egg-info` directory in the
+  interpreter's site-packages, system and user. Those names carry
+  versions, so a Python upgrade, `pip install`, upgrade or uninstall
+  invalidates every target. Without it, all of those left the whole repo
+  `cached` and green — a stale PASS of exactly the kind criterion 2
+  forbids, since none of these inputs is a file in the repo. Computed
+  once per run from one directory listing per site dir (~0.1ms), not
+  `importlib.metadata`, to stay off the startup cost in §6. It is
+  deliberately coarse: any patch release or package change reruns
+  everything once, which errs toward redundant work, never toward a
+  false pass. Not covered: the *contents* of an editable install
+  outside the repo, and `PYTHONPATH` entries outside site-packages.
 - **Content hashing, not mtimes.** Immune to `touch`, to fresh
   checkouts, to clock skew, and to iSH-AOK's questionable time
   accounting (observed reporting `user 24m40s` for a 42s run). A whole
