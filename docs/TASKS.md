@@ -331,7 +331,9 @@ for effort.
   in `.lirk-root`'s `ignore` silently excludes nothing, and the
   failure then shows up as a confusing graph error from the very
   fixtures it was meant to hide.
-- [ ] **F9 — Publish to PyPI after the v1 tag.** `pip install lirk`
+- [~] **F9 — Publish to PyPI after the v1 tag.** *In progress
+  2026-11-21:* trusted-publishing workflow and packaging metadata ready
+  (`docs/RELEASING.md`); the first upload will be 1.0.1. Original note: `pip install lirk`
   rather than a git URL. Packaging is already in place.
 - [ ] **F10 — L7 (ancestor `__init__.py`).** Already tracked above;
   listed here so the whole "what next" picture is in one place. Still
@@ -348,18 +350,20 @@ stale-PASS path remains open.**
 The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
 2026-08-04), so nothing is queued behind the tag either.
 
-1. **Create the `v1.0.0` git tag on `main`.** The release work merged
-   (PR #1, 2026-11-21); the tag push itself was left to the author.
-   `pyproject.toml` already says `1.0.0` (decided 2026-11-21: the plain
-   reading of "v1"). The tag goes on `main`, not on a feature branch.
-2. **Roadmap v1.x is complete** (R1–R4). Next is evidence rather than
-   features: the `slingshot` project, built with lirk from its first
-   commit, is the fourth real repo. Its `docs/lirk-notes.md` will drive
-   what comes next. F9 (PyPI) is the remaining adoption step.
-3. **L7**, only if a real repo hits it. **L3**'s remaining half only if
+1. **Roadmap v1.x is complete** (R1–R4) and released as `v1.0.0`.
+   Next is evidence rather than features: the `slingshot` project, built
+   with lirk from its first commit, is the fourth real repo. Its
+   `docs/lirk-notes.md` drives what comes next. F9 (PyPI) is the
+   remaining adoption step.
+2. **L7**, only if a real repo hits it. **L3**'s remaining half only if
    concurrent runs become a real workflow.
 
 ## Recently closed
+
+- **v1.0.0 released** (2026-11-21). Tagged on `main` at the PR #3 merge
+  (`39047ee`), so the release includes all of v1.x: environment
+  fingerprinting, pytest runner, `verify`, `fix`, `init`, CI, timings,
+  and the slingshot fixes.
 
 - **slingshot milestone-1 findings** (2026-11-21). The fourth real repo,
   built with lirk from its first commit, reported in its

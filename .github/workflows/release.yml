@@ -1,0 +1,65 @@
+# Publish to PyPI when a GitHub release is published.
+#
+# Uses PyPI trusted publishing (OIDC): PyPI is configured to trust this
+# exact workflow file in socitt/lirk, so no API token exists anywhere --
+# nothing to leak, rotate or store as a secret. See docs/RELEASING.md.
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # A release whose tag disagrees with the package version would put
+      # the wrong number on PyPI permanently (PyPI never lets a version be
+      # re-uploaded), so refuse before building anything.
+      - name: Tag matches pyproject version
+        run: |
+          python - <<'PY'
+          import os, sys, tomllib
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          if tag != f"v{version}":
+              sys.exit(f"tag {tag!r} does not match pyproject version {version!r} (expected 'v{version}')")
+          print(f"tag {tag} matches version {version}")
+          PY
+      - name: Test before publishing
+        run: |
+          python -m pip install pytest
+          python -m unittest discover -s tests -t .
+          python -m lirk test //...
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Must match the environment named in PyPI's trusted-publisher entry.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/lirk/
+    permissions:
+      id-token: write  # the OIDC token PyPI verifies; nothing else
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
