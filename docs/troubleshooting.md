@@ -72,7 +72,9 @@ check is what keeps cached results honest; see
 **`orphan_user.py imports 'orphan.thing' -- no target declares
 orphan/thing.py`.** The imported file isn't in any target. Add it to a
 target's `srcs` (often it's an `__init__.py`), then depend on that
-target.
+target. This includes a package's `__init__.py` on the way to a module:
+`import games.nemo.brain` runs `games/__init__.py` too, so that file
+must be declared and in the importer's deps.
 
 **`missing source file(s): greet.py`.** A file listed in `srcs` or
 `data` doesn't exist. Only that target fails; others carry on, and

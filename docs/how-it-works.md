@@ -62,7 +62,9 @@ package changes. The cached pass would quietly go stale.
 
 So when lirk checks a target, it reads every import in its source files
 (plus any module a test runs with `python -m`) and confirms each one is
-covered by `deps`. An import that isn't fails
+covered by `deps`, including the `__init__.py` of every package along
+the way, since `import a.b.c` runs `a/__init__.py` and `a/b/__init__.py`
+too. An import that isn't fails
 the build, naming exactly what to add, and `lirk fix` can add it for
 you. Imports from the standard library and installed packages are
 ignored.
@@ -99,6 +101,14 @@ on `PYTHONPATH`. Standard input is empty, so a test that waits for
 input fails immediately instead of hanging. Each file has a time limit
 (`timeout`, 600 seconds by default). Output is printed exactly as your
 test runner wrote it.
+
+Before running, lirk deletes the compiled bytecode (`__pycache__`) of
+your repo's own files that the test depends on. Python decides whether
+bytecode is current by a file's timestamp and size, not its contents,
+so an edit that keeps both (same-length text, or a tool like `cp -p` or
+`tar` that preserves timestamps) would otherwise run the old code.
+Only your repo's files are recompiled; the standard library keeps its
+cache.
 
 A file that defines no tests counts as a failure, not a pass: it's
 almost always a mistake, such as a renamed test class.

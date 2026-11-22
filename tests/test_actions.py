@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import shutil
 import tempfile
 import unittest
@@ -727,6 +728,144 @@ class RunModuleDetectionTests(unittest.TestCase):
     def test_a_dash_m_naming_no_repo_module_is_ignored(self):
         body = "import subprocess, sys\nsubprocess.run([sys.executable, '-m', 'pip', '--version'])\n"
         self.assertTrue(self._validate(body, "[]").ok)
+
+
+class StaleBytecodeTests(unittest.TestCase):
+    """An edit that keeps a file's size and mtime must still run the new
+    code. Python and pytest both trust bytecode by mtime+size, so lirk
+    used to rerun the test -- correctly -- on the old code, a false PASS
+    that --force confirmed (found by terminal-projects)."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name)
+        (self.root / "pkg").mkdir()
+        (self.root / "pkg" / "mod.py").write_text("VALUE = 1\n")
+
+    def _write_test(self, runner):
+        if runner == "pytest":
+            body = "from pkg.mod import VALUE\n\ndef test_value():\n    assert VALUE == 1\n"
+        else:
+            body = ("import unittest\nfrom pkg.mod import VALUE\n\n"
+                    "class T(unittest.TestCase):\n    def test(self):\n"
+                    "        self.assertEqual(VALUE, 1)\n")
+        (self.root / "pkg" / "test_mod.py").write_text(body)
+        line = f'runner = "{runner}"\n' if runner == "pytest" else ""
+        (self.root / "pkg" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "mod"\ntype = "library"\nsrcs = ["mod.py"]\n\n'
+            f'[[target]]\nname = "mod_test"\ntype = "test"\n{line}srcs = ["test_mod.py"]\n'
+            'deps = [":mod"]\n'
+        )
+
+    def _run(self):
+        graph = build_graph(self.root)
+        label = "//pkg:mod_test"
+        return run_test(graph.targets[label], self.root, _import_env(graph, self.root, label))
+
+    def _edit_keeping_size_and_mtime(self, rel, text):
+        path = self.root / rel
+        st = path.stat()
+        self.assertEqual(len(text), st.st_size)
+        path.write_text(text)
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+    def _check(self, runner, edit):
+        self._write_test(runner)
+        self.assertTrue(self._run().ok)            # writes bytecode
+        edit()
+        self.assertFalse(self._run().ok, "ran stale bytecode")
+
+    def test_unittest_sees_a_library_edit(self):
+        self._check("unittest", lambda: self._edit_keeping_size_and_mtime("pkg/mod.py", "VALUE = 2\n"))
+
+    def test_pytest_sees_a_library_edit(self):
+        if importlib.util.find_spec("pytest") is None:
+            self.skipTest("pytest not installed")
+        self._check("pytest", lambda: self._edit_keeping_size_and_mtime("pkg/mod.py", "VALUE = 2\n"))
+
+    def test_pytest_sees_an_edit_to_the_test_itself(self):
+        # pytest's own assertion-rewrite cache, not Python's.
+        if importlib.util.find_spec("pytest") is None:
+            self.skipTest("pytest not installed")
+        def edit():
+            text = (self.root / "pkg" / "test_mod.py").read_text().replace("== 1", "== 3")
+            self._edit_keeping_size_and_mtime("pkg/test_mod.py", text)
+        self._check("pytest", edit)
+
+    def test_purge_leaves_unrelated_bytecode_alone(self):
+        cache = self.root / "pkg" / "__pycache__"
+        cache.mkdir()
+        (cache / "mod.cpython-313.pyc").write_bytes(b"x")
+        (cache / "mod.cpython-313-pytest-9.1.1.pyc").write_bytes(b"x")
+        (cache / "module.cpython-313.pyc").write_bytes(b"x")   # different stem
+        actions.purge_bytecode([self.root / "pkg" / "mod.py"])
+        self.assertEqual(sorted(p.name for p in cache.iterdir()), ["module.cpython-313.pyc"])
+
+
+class AncestorInitTests(unittest.TestCase):
+    """Importing a.b.mod runs a/__init__.py and a/b/__init__.py too, so
+    each must belong to a target in the closure (TASKS L7)."""
+
+    def setUp(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        self.root = Path(tmpdir.name)
+        (self.root / "games" / "nemo").mkdir(parents=True)
+        (self.root / "games" / "__init__.py").write_text("LEVEL = 1\n")
+        (self.root / "games" / "nemo" / "__init__.py").write_text("")
+        (self.root / "games" / "nemo" / "brain.py").write_text("X = 1\n")
+        (self.root / "app").mkdir()
+        (self.root / "app" / "app.py").write_text("from games.nemo.brain import X\n")
+        (self.root / "app" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "app"\ntype = "library"\nsrcs = ["app.py"]\n'
+            'deps = ["//games/nemo:nemo"]\n'
+        )
+
+    def _validate(self, games_build):
+        if games_build is None:
+            (self.root / "games" / "BUILD.lirk").unlink(missing_ok=True)
+        else:
+            (self.root / "games" / "BUILD.lirk").write_text(games_build)
+        graph = build_graph(self.root)
+        return validate_target(graph.targets["//app:app"], self.root,
+                               _import_env(graph, self.root, "//app:app"))
+
+    def _nemo(self, deps):
+        (self.root / "games" / "nemo" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "nemo"\ntype = "library"\n'
+            f'srcs = ["__init__.py", "brain.py"]\ndeps = {deps}\n'
+        )
+
+    def test_an_undeclared_ancestor_init_fails(self):
+        self._nemo("[]")
+        result = self._validate(None)
+        self.assertFalse(result.ok)
+        self.assertIn("app.py imports 'games' -- no target declares games/__init__.py",
+                      result.message)
+
+    def test_a_declared_ancestor_outside_the_closure_fails(self):
+        self._nemo("[]")
+        result = self._validate(
+            '[[target]]\nname = "games"\ntype = "library"\nsrcs = ["__init__.py"]\n'
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("imports 'games' (//games:games), not in deps", result.message)
+
+    def test_an_ancestor_reached_through_deps_passes(self):
+        self._nemo('["//games:games"]')
+        result = self._validate(
+            '[[target]]\nname = "games"\ntype = "library"\nsrcs = ["__init__.py"]\n'
+        )
+        self.assertTrue(result.ok, result.message)
+
+    def test_namespace_packages_without_inits_are_unaffected(self):
+        (self.root / "games" / "__init__.py").unlink()
+        (self.root / "games" / "nemo" / "__init__.py").unlink()
+        (self.root / "games" / "nemo" / "BUILD.lirk").write_text(
+            '[[target]]\nname = "nemo"\ntype = "library"\nsrcs = ["brain.py"]\n'
+        )
+        self.assertTrue(self._validate(None).ok)
 
 
 if __name__ == "__main__":
