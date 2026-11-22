@@ -107,8 +107,12 @@ anyway depends on that file without declaring it:
   STALE  //furminal:main_test depends on region-explorer/runner.py (//region-explorer:runner) without declaring it
 ```
 
-Your working tree is never touched. It's slow, roughly (sources) ×
-(tests) runs, so it's an occasional audit: limit it with labels
+Your source files are never touched. It prints a line per source as
+it goes, and it's incremental: a source/test pair that checked clean
+is skipped next time unless the source or the test (or anything it
+depends on) has changed, so after the first run it only rechecks what
+your edits affect. `--force` rechecks everything. The first run is the
+slow one, roughly (sources) × (tests) test runs. Limit it with labels
 (`lirk verify --mutate //app/...`) or `--sample N`.
 
 ## `lirk clean`

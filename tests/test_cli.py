@@ -1122,13 +1122,21 @@ class FailFastTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("3 built", out)
 
-    def test_not_run_tests_count_in_the_test_total(self):
+    def test_tests_never_reached_are_not_counted_as_failed(self):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, root, ignore_errors=True)
-        shutil.copytree(FIXTURES / "failing_test_repo", root, dirs_exist_ok=True)
+        (root / ".lirk-root").write_text("")
+        for name, ok in (("t1", False), ("t2", True), ("t3", True)):
+            (root / name).mkdir()
+            (root / name / f"test_{name}.py").write_text(
+                "import unittest\n\nclass T(unittest.TestCase):\n"
+                f"    def test(self):\n        self.assertTrue({ok})\n"
+            )
+            (root / name / "BUILD.lirk").write_text(
+                f'[[target]]\nname = "{name}"\ntype = "test"\nsrcs = ["test_{name}.py"]\n'
+            )
         _, out = _run(["test", "//...", "--fail-fast"], root)
-        self.assertRegex(out, r"lirk: 0/\d+ tests passed")
-
+        self.assertIn("lirk: 0/1 tests passed, 2 not run", out)
 
 class CachePruningTests(unittest.TestCase):
     def setUp(self):

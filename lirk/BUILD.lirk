@@ -44,7 +44,7 @@ deps = [":actions", ":graph", ":targets"]
 name = "mutate"
 type = "library"
 srcs = ["mutate.py"]
-deps = [":actions", ":graph"]
+deps = [":actions", ":cache", ":graph"]
 
 [[target]]
 name = "scaffold"

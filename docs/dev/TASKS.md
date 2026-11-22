@@ -9,7 +9,7 @@ constraints are not negotiable: no process group, no session, no pty,
 no `shell=True`, no results-file step, no parallel execution. If a task
 seems to require one, stop and report it rather than doing it.
 
-Last verified against source (2026-11-21): 309 tests, `python3 -m
+Last verified against source (2026-11-22): 323 tests, `python3 -m
 unittest discover -s tests -t .`. lirk also builds and tests itself —
 `lirk build //...` (19 targets) and `lirk test //...` (8 test targets)
 — which runs alongside the unittest invocation rather than replacing
@@ -194,7 +194,7 @@ new failure mode of its own (a stale lock after a crash — and iSH-AOK
 crashing is the environment this tool exists for). Not worth it unless
 concurrent runs actually become a workflow.
 
-**L7 — an undeclared *ancestor* `__init__.py` is still unfingerprinted.**
+**L7 — closed 2026-11-21 (see Recently closed).** ~~An undeclared *ancestor* `__init__.py` was unfingerprinted.~~
 The residual sliver of H2. `_resolve_module` resolves a dotted path to
 one file and does not also collect the `__init__.py` of each package
 along the way, so `import a.b.c` never looks at `a/__init__.py`; if no
@@ -370,10 +370,38 @@ The whole termrery-derived backlog is now closed too (M3–M6, L6, D4,
    with lirk from its first commit, is the fourth real repo. Its
    `docs/lirk-notes.md` drives what comes next. F9 (PyPI) is the
    remaining adoption step.
-2. **L7**, only if a real repo hits it. **L3**'s remaining half only if
+2. L7 is closed (2026-11-21). **L3**'s remaining half only if
    concurrent runs become a real workflow.
 
 ## Recently closed
+
+- **terminal-projects round 3 (R3-1 to R3-4)** (2026-11-21), from a stress
+  test with two new sub-projects (85 targets). Version 1.1.1.
+  - **R3-1 (high): stale bytecode made lirk report and cache a wrong
+    PASS.** Python and pytest trust a `.pyc` by the source's mtime and
+    size, not its contents, so an edit keeping both (same-length text,
+    timestamps preserved by `cp -p`/`tar`/`rsync`, or two edits within a
+    second) made lirk rerun the test, correctly, against old code.
+    `--force` and `verify` confirmed it. lirk now deletes the bytecode of
+    the repo sources a test can load, once per run, before running it.
+    The suggested fix (an empty `PYTHONPYCACHEPREFIX`) was measured first
+    and rejected: it also discards the stdlib's bytecode and made every
+    test process ~5x slower (61→305ms; pytest startup 159→696ms). An A/B
+    on a 100-package mesh shows the targeted purge costs nothing
+    measurable. Tests cover unittest, pytest, and pytest's own
+    assertion-rewrite cache. `ACTION_VERSION` 13 → 14.
+  - **R3-2: L7 closed.** The `__init__.py` of each package along a dotted
+    import must now be declared and in the closure. Seeded on
+    terminal-projects exactly as reported (`nemo/__init__.py`
+    undeclared), the build now fails, so `//nemo/cam:avatar_test` can't go
+    green. terminal-projects and slingshot both build clean.
+  - **R3-3: `verify --mutate` prints a line per source** and is
+    incremental. A clean (source, test) pair is stamped with the source's
+    bytes and the test's fingerprint and skipped while both are
+    unchanged. Findings are always rechecked; `--force` rechecks all.
+  - **R3-4:** `--fail-fast`'s summary counts unrun tests apart: `0/1 tests
+    passed, 40 not run`.
+  - PyPI's one-line description now matches the docs.
 
 - **terminal-projects on 1.0.1: path-loaded code, and `verify --mutate`**
   (2026-11-21). See the correction under criterion 2. Two changes:

@@ -123,6 +123,9 @@ class ImportEnv:
     resolved: dict[tuple[str, Path], Path | None] = field(
         default_factory=dict, compare=False
     )
+    # Sources whose bytecode has already been purged in this run (see
+    # purge_bytecode). Shared across targets like `resolved`.
+    purged: set[Path] = field(default_factory=set, compare=False)
 
 
 def missing_files(target: Target, root: Path) -> list[str]:
@@ -327,12 +330,10 @@ def import_problems(
     free -- once the file must be declared, whatever *it* imports falls
     under the rule above (docs/dev/TASKS.md H2).
 
-    Only the module the dotted path resolves to is checked, not the
-    `__init__.py` of each package along the way (see _resolve_module).
-    An undeclared *ancestor* package init is therefore still an
-    unfingerprinted input; it resolved to nothing across all three real
-    repos, and collecting ancestors would turn one clear error into
-    several.
+    The `__init__.py` of each package along a dotted path is checked
+    too, since importing a.b.c runs a/__init__.py and a/b/__init__.py.
+    This was once left out (TASKS L7) because no repo hit it; nested
+    packages in terminal-projects did.
     """
     pkg_dir = root / target.package
     root_resolved = root.resolve()
@@ -344,6 +345,7 @@ def import_problems(
         for dotted, base, verb in _imported_modules(tree, src_path):
             bases = (base,) if base is not None else (pkg_dir, root)
             found = None
+            found_base = None
             for one in bases:
                 key = (dotted, one)
                 if key not in env.resolved:
@@ -351,19 +353,33 @@ def import_problems(
                     env.resolved[key] = hit.resolve() if hit is not None else None
                 found = env.resolved[key]
                 if found is not None:
+                    found_base = one
                     break
             if found is None:
                 continue
-            if not found.is_relative_to(root_resolved):
-                continue
-            owners = env.owners.get(found, frozenset())
-            if owners & env.allowed:
-                continue
-            if (src, dotted) in seen:
-                continue
-            seen.add((src, dotted))
-            rel = found.relative_to(root_resolved).as_posix()
-            problems.append(ImportProblem(src, dotted, rel, owners, verb))
+            # Importing a.b.c also runs a/__init__.py and a/b/__init__.py:
+            # they are inputs as surely as c is, and an undeclared one is an
+            # unfingerprinted file (TASKS L7, hit for real by nested
+            # packages in terminal-projects). Checked nearest-the-root
+            # first, so the outermost undeclared package is reported first.
+            parts = dotted.split(".")
+            checks = [
+                (".".join(parts[:i]), found_base.joinpath(*parts[:i], "__init__.py"))
+                for i in range(1, len(parts))
+            ]
+            checks = [(name, path.resolve()) for name, path in checks if path.is_file()]
+            checks.append((dotted, found))
+            for name, path in checks:
+                if not path.is_relative_to(root_resolved):
+                    continue
+                owners = env.owners.get(path, frozenset())
+                if owners & env.allowed:
+                    continue
+                if (src, name) in seen:
+                    continue
+                seen.add((src, name))
+                rel = path.relative_to(root_resolved).as_posix()
+                problems.append(ImportProblem(src, name, rel, owners, verb))
 
     return problems
 
@@ -507,6 +523,62 @@ def _parse_sources(
     return parsed, None
 
 
+def purge_bytecode(paths: Iterable[Path], done: set[Path] | None = None) -> None:
+    """Delete the compiled bytecode of each source, so the next import
+    compiles it from what the file says now.
+
+    Python trusts a `.pyc` whose recorded mtime and size match the
+    source, without reading the source -- and pytest's assertion-rewrite
+    cache does the same. So an edit that keeps both (same-length text,
+    and a tool that preserves timestamps: `cp -p`, `tar`, `rsync`, or a
+    quick edit within the filesystem's timestamp resolution) made lirk
+    rerun the test, correctly, while Python ran the *old* code: a false
+    PASS that `--force` and `verify` confirmed. Found by the
+    terminal-projects repo.
+
+    Deleting just the repo sources' bytecode, once per run, closes that
+    at the cost of recompiling a handful of small files. The blunt
+    alternative -- an empty PYTHONPYCACHEPREFIX -- also discards the
+    standard library's bytecode and made every test process ~5x slower
+    (61ms -> 305ms; pytest startup 159ms -> 696ms), a bad trade on iSH.
+
+    Matches `<stem>.*.pyc` in the source's __pycache__, which covers
+    `mod.cpython-313.pyc`, its `.opt-N` variants and pytest's
+    `mod.cpython-313-pytest-9.1.pyc`.
+    """
+    for path in paths:
+        if done is not None:
+            if path in done:
+                continue
+            done.add(path)
+        cache = path.parent / "__pycache__"
+        if not cache.is_dir():
+            continue
+        for compiled in cache.glob(f"{path.stem}.*.pyc"):
+            try:
+                compiled.unlink()
+            except OSError:
+                pass
+
+
+def _test_inputs(target: Target, root: Path, env: ImportEnv | None) -> list[Path]:
+    """Every repo Python file a test target's run can load: the srcs of
+    its whole dep closure (when the caller supplied one), its own srcs,
+    its pytest conftests, and any `.py` under its `data`."""
+    pkg_dir = root / target.package
+    paths = [(pkg_dir / src).resolve() for src in target.srcs]
+    if env is not None:
+        paths += [p for p, labels in env.owners.items() if labels & env.allowed]
+    paths += [p.resolve() for p in pytest_inputs(target, root) if p.suffix == ".py"]
+    for entry in target.data:
+        data = pkg_dir / entry
+        if data.is_dir():
+            paths += [p.resolve() for p in data.rglob("*.py")]
+        elif data.suffix == ".py":
+            paths.append(data.resolve())
+    return paths
+
+
 def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> ActionResult:
     """Run a test target's source files via `python3 -m unittest`, or
     `python3 -m pytest` for a target declaring `runner = "pytest"`.
@@ -534,6 +606,8 @@ def run_test(target: Target, root: Path, env: ImportEnv | None = None) -> Action
     skipped_whole: list[str] = []
 
     timeout = target.timeout if target.timeout is not None else TEST_TIMEOUT_SECONDS
+
+    purge_bytecode(_test_inputs(target, root, env), env.purged if env is not None else None)
 
     child_env = os.environ.copy()
     root_str = str(root.resolve())

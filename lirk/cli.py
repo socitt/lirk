@@ -273,6 +273,7 @@ def _execute(
     # case worth catching.
     owners = owner_index(graph.targets, root)
     resolved: dict = {}  # import-resolution memo shared by this run (ImportEnv)
+    purged: set = set()  # sources whose bytecode this run already purged
 
     # Check every target's declared files exist before fingerprinting
     # anything: compute_fingerprints reads file contents unconditionally,
@@ -376,7 +377,7 @@ def _execute(
                     summary.tests_cached += 1
                 continue
 
-            env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}), resolved=resolved)
+            env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}), resolved=resolved, purged=purged)
 
             started = time.monotonic()
             if is_test:
@@ -425,7 +426,11 @@ def _execute(
         # (deleted or renamed) would otherwise accumulate forever. Only
         # labels absent from the *whole* graph are dropped -- never ones
         # merely outside this run's selection.
-        for key in [k for k in cache if k.partition(":")[2] not in graph.targets]:
+        # (A `mutate:` key is "<test label>|<src>"; its label is the test's.)
+        for key in [
+            k for k in cache
+            if k.partition(":")[2].partition("|")[0] not in graph.targets
+        ]:
             del cache[key]
         # Always, once: covers whatever the interval held back, an
         # interruption mid-run, and a run where nothing passed (which
@@ -541,7 +546,11 @@ def cmd_test(
     _print_slowest(summary)
     _print_failures(summary)
     passed = summary.tests_passed + summary.tests_cached
-    print(f"lirk: {passed}/{summary.tests_total} tests passed")
+    # Tests --fail-fast never reached are neither passed nor failed: they
+    # are reported apart, not counted against the run.
+    attempted = summary.tests_total - summary.tests_not_run
+    not_run = f", {summary.tests_not_run} not run" if summary.tests_not_run else ""
+    print(f"lirk: {passed}/{attempted} tests passed{not_run}")
     print("lirk: OK" if ok else "lirk: FAILED")
     return 0 if ok else 1
 
@@ -566,7 +575,11 @@ def _fingerprintable(
 
 
 def cmd_verify_mutate(
-    root: Path, labels: list[str], sample: int | None = None, seed: int | None = None
+    root: Path,
+    labels: list[str],
+    sample: int | None = None,
+    seed: int | None = None,
+    force: bool = False,
 ) -> int:
     """`lirk verify --mutate`: see lirk/mutate.py."""
     from lirk.mutate import find_undeclared_edges
@@ -580,7 +593,9 @@ def cmd_verify_mutate(
         print("lirk: no test targets found")
         return 0
 
-    edges, failing = find_undeclared_edges(root, tests, sample=sample, seed=seed)
+    edges, failing = find_undeclared_edges(
+        root, tests, sample=sample, seed=seed, force=force
+    )
     for label in failing:
         print(f"  skipped {label}: fails even unbroken, so it can't be checked")
     if edges:
@@ -651,11 +666,12 @@ def cmd_verify(
 
     owners = owner_index(graph.targets, root)
     resolved: dict = {}  # import-resolution memo shared by this run (ImportEnv)
+    purged: set = set()  # sources whose bytecode this run already purged
     stale: list[str] = []
     verified = 0
     for kind, label in claims:
         target = graph.targets[label]
-        env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}), resolved=resolved)
+        env = ImportEnv(owners=owners, allowed=transitive_closure(graph, {label}), resolved=resolved, purged=purged)
         what = "tests" if kind == "test" else "build"
         if kind == "test":
             result = run_test(target, root, env)
@@ -912,6 +928,11 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         help="break each library source in turn and rerun the tests that claim "
              "not to depend on it, to find undeclared dependencies (slow)",
     )
+    verify_p.add_argument(
+        "--force", action="store_true",
+        help="with --mutate: recheck every pair, including ones unchanged "
+             "since they last checked clean",
+    )
     verify_p.add_argument("--root", type=Path, default=None, help=root_help)
 
     fix_p = sub.add_parser(
@@ -972,7 +993,9 @@ def main(argv: list[str] | None = None, root: Path | None = None) -> int:
         if args.sample is not None and args.sample < 1:
             parser.error("--sample must be at least 1")
         if args.mutate:
-            return cmd_verify_mutate(root, args.labels, sample=args.sample, seed=args.seed)
+            return cmd_verify_mutate(
+                root, args.labels, sample=args.sample, seed=args.seed, force=args.force
+            )
         return cmd_verify(root, args.labels, sample=args.sample, seed=args.seed)
     return cmd_test(root, args.labels, force=args.force, fail_fast=args.fail_fast)
 

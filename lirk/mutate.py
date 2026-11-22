@@ -21,14 +21,20 @@ in lirk, the runs are serial, one subprocess per test file.
 
 from __future__ import annotations
 
+import hashlib
 import random
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 from lirk.actions import owner_index, run_test
-from lirk.graph import Graph, build_graph, transitive_closure
+from lirk.cache import CACHE_FILENAME, compute_fingerprints, load_cache, save_cache
+from lirk.graph import Graph, build_graph, topological_sort, transitive_closure
+
+# Cache keys for pairs that checked clean: "mutate:<test label>|<src>".
+MUTATE_PREFIX = "mutate:"
 
 # Prepended to a source to break it. A top-level raise fails any import
 # or load of the file, however it is reached. (Before a `from __future__`
@@ -60,19 +66,38 @@ def _copy_repo(root: Path, dest: Path) -> None:
     shutil.copytree(root, dest, ignore=ignore, symlinks=True)
 
 
+def _pair_stamp(src_bytes: bytes, test_fingerprint: str) -> str:
+    return hashlib.sha256(src_bytes + b"\0" + test_fingerprint.encode()).hexdigest()
+
+
 def find_undeclared_edges(
     root: Path,
     tests: list[str],
     sample: int | None = None,
     seed: int | None = None,
+    force: bool = False,
     report=print,
 ) -> tuple[list[Edge], list[str]]:
     """Run the audit. Returns (undeclared edges, tests excluded because
-    they fail even unbroken). `tests` are labels of test targets."""
+    they fail even unbroken). `tests` are labels of test targets.
+
+    Incremental unless `force`: a (source, test) pair that checked clean
+    is recorded in .lirk-cache.json with a stamp of the source's bytes
+    and the test's fingerprint, and skipped while both are unchanged.
+    The test's fingerprint covers everything it declares (plus the
+    Python environment); anything it loads *without* declaring is what
+    this command reports, so once a run comes back clean the stamp
+    covers all the test can reach. Only clean pairs are recorded: a
+    finding is always rechecked.
+    """
     with tempfile.TemporaryDirectory(prefix="lirk-mutate-") as tmp:
         copy = Path(tmp) / "repo"
         _copy_repo(root, copy)
         graph: Graph = build_graph(copy)
+
+        cache_path = root / CACHE_FILENAME
+        cache = load_cache(cache_path)
+        fingerprints = compute_fingerprints(graph, copy, topological_sort(graph))
 
         report(f"lirk: baseline: running {len(tests)} test target(s) unchanged")
         passing, failing = [], []
@@ -95,30 +120,60 @@ def find_undeclared_edges(
             report(f"lirk: sampling {sample} of {len(sources)} sources (seed {seed})")
             sources = sorted(random.Random(seed).sample(sources, sample))
 
-        plan = [
-            (path, [t for t in passing if not (closures[t] & owners[path])])
-            for path in sources
-        ]
-        runs = sum(len(candidates) for _, candidates in plan)
+        copy_resolved = copy.resolve()
+        plan = []
+        skipped_pairs = 0
+        for path in sources:
+            rel = path.relative_to(copy_resolved).as_posix()
+            data = path.read_bytes()
+            candidates = []
+            for t in passing:
+                if closures[t] & owners[path]:
+                    continue
+                key = f"{MUTATE_PREFIX}{t}|{rel}"
+                if not force and cache.get(key) == _pair_stamp(data, fingerprints[t]):
+                    skipped_pairs += 1
+                    continue
+                candidates.append(t)
+            if candidates:
+                plan.append((path, rel, data, candidates))
+        runs = sum(len(c) for *_, c in plan)
+        if skipped_pairs:
+            report(f"lirk: skipping {skipped_pairs} pair(s) unchanged since they "
+                   "last checked clean (--force rechecks them)")
         report(f"lirk: breaking {len(plan)} source(s) in turn: {runs} test run(s)")
 
-        copy_resolved = copy.resolve()
         edges: list[Edge] = []
-        for path, candidates in plan:
-            if not candidates:
-                continue
-            rel = path.relative_to(copy_resolved).as_posix()
-            original = path.read_text(encoding="utf-8")
+        clean: dict[str, str] = {}
+        for index, (path, rel, data, candidates) in enumerate(plan, start=1):
+            started = time.monotonic()
+            original = data.decode("utf-8")
             path.write_text(BREAK + original, encoding="utf-8")
+            found_here = 0
             try:
                 for test in candidates:
-                    if not run_test(graph.targets[test], copy).ok:
-                        edge = Edge(test, rel, sorted(owners[path]))
-                        edges.append(edge)
-                        report(
-                            f"  STALE  {test} depends on {rel} "
-                            f"({', '.join(edge.owners)}) without declaring it"
-                        )
+                    if run_test(graph.targets[test], copy).ok:
+                        clean[f"{MUTATE_PREFIX}{test}|{rel}"] = _pair_stamp(data, fingerprints[test])
+                        continue
+                    edge = Edge(test, rel, sorted(owners[path]))
+                    edges.append(edge)
+                    found_here += 1
+                    report(
+                        f"  STALE  {test} depends on {rel} "
+                        f"({', '.join(edge.owners)}) without declaring it"
+                    )
             finally:
                 path.write_text(original, encoding="utf-8")
+            # One line per source, so a long run never looks hung -- on a
+            # phone this can take a long time.
+            report(
+                f"  [{index}/{len(plan)}] {rel}: {len(candidates)} test(s), "
+                f"{found_here} finding(s), {time.monotonic() - started:.1f}s"
+            )
+
+        # Re-read before writing: a lirk run may have saved meanwhile.
+        if clean:
+            latest = load_cache(cache_path)
+            latest.update(clean)
+            save_cache(cache_path, latest)
         return edges, failing

@@ -31,7 +31,7 @@ class CacheError(Exception):
 # Bump this whenever the behaviour of `validate_target` or `run_test`
 # changes, so existing caches are invalidated instead of trusting a
 # green result computed under different rules.
-ACTION_VERSION = 13
+ACTION_VERSION = 14
 
 
 def _hash_file(path: Path, label: str) -> str:

@@ -47,13 +47,13 @@ class MutateTests(unittest.TestCase):
         )
         (self.root / "app" / "loader.py").write_text(APP)
         (self.root / "app" / "test_app.py").write_text(APP_TEST)
-        (self.root / "other" / "other.py").write_text("X = 1\n")
+        (self.root / "other" / "values.py").write_text("X = 1\n")
         (self.root / "other" / "test_other.py").write_text(
-            "import unittest\nfrom other.other import X\n\n"
+            "import unittest\nfrom other.values import X\n\n"
             "class T(unittest.TestCase):\n    def test(self):\n        self.assertEqual(X, 1)\n"
         )
         (self.root / "other" / "BUILD.lirk").write_text(
-            '[[target]]\nname = "other"\ntype = "library"\nsrcs = ["other.py"]\n\n'
+            '[[target]]\nname = "other"\ntype = "library"\nsrcs = ["values.py"]\n\n'
             '[[target]]\nname = "other_test"\ntype = "test"\nsrcs = ["test_other.py"]\ndeps = [":other"]\n'
         )
         self._app_build(declared=False)
@@ -100,10 +100,54 @@ class MutateTests(unittest.TestCase):
         self.assertIn("0 undeclared dependencies found", out)
 
     def test_the_working_tree_is_never_touched(self):
-        before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        # Only lirk's own cache file may change (it records clean pairs).
+        def snapshot():
+            return {p: p.read_bytes() for p in self.root.rglob("*")
+                    if p.is_file() and not p.name.startswith(".lirk-cache")}
+        before = snapshot()
         self._verify_mutate()
-        after = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
-        self.assertEqual(before, after)
+        self.assertEqual(before, snapshot())
+
+    def test_every_test_passes_at_baseline(self):
+        # Guards the fixture itself: a test failing unbroken is skipped,
+        # which would quietly hollow out every other test here.
+        _, out = self._verify_mutate()
+        self.assertNotIn("fails even unbroken", out)
+
+    def test_a_second_run_skips_pairs_that_checked_clean(self):
+        self._app_build(declared=True)
+        _, first = self._verify_mutate()
+        self.assertIn("breaking 3 source(s)", first)
+        _, second = self._verify_mutate()
+        self.assertIn("skipping", second)
+        self.assertIn("breaking 0 source(s) in turn: 0 test run(s)", second)
+
+    def test_changing_a_source_rechecks_its_pairs(self):
+        self._app_build(declared=True)
+        self._verify_mutate()
+        (self.root / "engine" / "engine.py").write_text("POWER = 9  # edited\n")
+        _, out = self._verify_mutate()
+        # engine's own pairs are rechecked, and so are app_test's (its
+        # fingerprint includes engine); only the unaffected pair is skipped.
+        self.assertIn("engine/engine.py: 1 test(s)", out)
+        self.assertIn("skipping 1 pair(s)", out)
+
+    def test_force_rechecks_everything(self):
+        self._app_build(declared=True)
+        self._verify_mutate()
+        _, out = self._verify_mutate("--force")
+        self.assertNotIn("skipping", out)
+        self.assertIn("breaking 3 source(s)", out)
+
+    def test_findings_are_never_skipped(self):
+        self._verify_mutate()
+        code, out = self._verify_mutate()
+        self.assertEqual(code, 1)
+        self.assertIn("STALE  //app:app_test", out)
+
+    def test_progress_is_reported_per_source(self):
+        _, out = self._verify_mutate()
+        self.assertRegex(out, r"  \[1/\d+\] \S+\.py: \d+ test\(s\), \d+ finding\(s\), [\d.]+s")
 
     def test_a_test_failing_unbroken_is_skipped_not_blamed(self):
         (self.root / "other" / "test_other.py").write_text(
